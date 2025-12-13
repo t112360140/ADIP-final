@@ -78,7 +78,13 @@ function setEditImage(image, mode){
 function doGrabCut(rect, iterCount=2){
     if(image_editing_data.img){
         let src=image_editing_data.img.image.mat_clone();
+
         cv.resize(src, src, new cv.Size(512, 512*(src.rows/src.cols)), 0, 0, cv.INTER_AREA);
+        let newSrc = new cv.Mat();
+        src.convertTo(newSrc, -1, 1.2, 0); // alpha=1.2 (對比度增加 20%), beta=0
+        src.delete();
+        src = newSrc;
+
         let mask = new cv.Mat();
         let bgdModel = new cv.Mat();
         let fgdModel = new cv.Mat();
@@ -93,21 +99,22 @@ function doGrabCut(rect, iterCount=2){
 
         cv.grabCut(src, mask, rect, bgdModel, fgdModel, iterCount, cv.GC_INIT_WITH_RECT);
 
-        cv.resize(mask, mask, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
-        cv.resize(bgdModel, bgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
-        cv.resize(fgdModel, fgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
+        cv.resize(mask, mask, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_NEAREST);
+        cv.resize(bgdModel, bgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_NEAREST);
+        cv.resize(fgdModel, fgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_NEAREST);
 
         let output = image_editing_data.img.image.mat_clone();
 
         let outData = output.data;
         let maskData = mask.data;
+        const channels = output.channels();
         
         let alpha = 0.6;
         let beta = 1 - alpha;
 
         for (let i = 0; i < maskData.length; i++) {
             if (maskData[i] === 1 || maskData[i] === 3) {
-                let imgIdx = i * 3;
+                let imgIdx = i * channels;
                 outData[imgIdx] = (outData[imgIdx] * beta) + (255 * alpha);
                 outData[imgIdx + 1] = outData[imgIdx + 1] * beta;
                 outData[imgIdx + 2] = outData[imgIdx + 2] * beta;
