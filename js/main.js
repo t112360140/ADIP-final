@@ -22,30 +22,9 @@ imageInput.addEventListener('change', async()=>{
     try{
         if(window.cvReady){
             if(imageInput.files){
-                let counter=0;
                 for(let i=0;i<imageInput.files.length;i++){
                     const file=imageInput.files[i];
-                    const image=new Image();
-                    image.src=URL.createObjectURL(file);
-                    await new Promise((r)=>{
-                        image.onload=async function(){
-                            cv = (cv instanceof Promise) ? await cv : cv;
-                            let mat = cv.imread(image);
-                            cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
-
-                            imageList.push({
-                                name: file.name,
-                                image: mat,
-                                uuid: uuid(),
-                                type: TYPE.ORIGIN,
-                                height: image.height,
-                                width: image.width,
-                            });
-
-                            r();
-                        }
-                    });
-                    URL.revokeObjectURL(image.src);
+                    await addImageToList(file.name, file);
                 }
                 imageInput.value='';
                 fileUpdate();
@@ -77,27 +56,7 @@ async function loadExample(){
             const url=`dataset/${name}`;
             const req=await fetch(url);
             if(req.ok){
-                const image=new Image();
-                image.src=URL.createObjectURL(await req.blob());
-                await new Promise((r)=>{
-                    image.onload=async function(){
-                        cv = (cv instanceof Promise) ? await cv : cv;
-                        let mat = cv.imread(image);
-                        cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
-
-                        imageList.push({
-                            name: name,
-                            image: mat,
-                            uuid: uuid(),
-                            type: TYPE.ORIGIN,
-                            height: image.height,
-                            width: image.width,
-                        });
-
-                        r();
-                    }
-                });
-                URL.revokeObjectURL(image.src);
+                await addImageToList(name, await req.blob())
             }
         }
         fileUpdate();
@@ -136,6 +95,30 @@ function imageClone(data){
         cloneO[i] = imageClone(data[i]);
     }                  
     return cloneO;
+}
+
+async function addImageToList(name, blob){
+    const image=new Image();
+    image.src=URL.createObjectURL(blob);
+    await new Promise((r)=>{
+        image.onload=async function(){
+            cv = (cv instanceof Promise) ? await cv : cv;
+            let mat = cv.imread(image);
+            cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
+
+            imageList.push({
+                name: name,
+                image: mat,
+                uuid: uuid(),
+                type: TYPE.ORIGIN,
+                height: image.height,
+                width: image.width,
+            });
+
+            r();
+        }
+    });
+    URL.revokeObjectURL(image.src);
 }
 
 function removeImageFromList(index){
