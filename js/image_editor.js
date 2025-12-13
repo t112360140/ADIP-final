@@ -89,7 +89,7 @@ function doGrabCut(rect, iterCount=1){
 
         for (let i = 0; i < maskData.length; i++) {
             if (maskData[i] === 1 || maskData[i] === 3) {
-                let imgIdx = i * 4;
+                let imgIdx = i * 3;
                 outData[imgIdx] = (outData[imgIdx] * beta) + (255 * alpha);
                 outData[imgIdx + 1] = outData[imgIdx + 1] * beta;
                 outData[imgIdx + 2] = outData[imgIdx + 2] * beta;
