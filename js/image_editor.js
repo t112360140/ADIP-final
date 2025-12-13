@@ -70,7 +70,7 @@ function setEditImage(image, mode){
 }
 
 
-function doGrabCut(rect, iterCount=2){
+function doGrabCut(rect, iterCount=1){
     if(image_editing_data.img){
         const src=image_editing_data.img.image;
         let mask = new cv.Mat();

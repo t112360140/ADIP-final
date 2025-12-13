@@ -31,6 +31,7 @@ imageInput.addEventListener('change', async()=>{
                         image.onload=async function(){
                             cv = (cv instanceof Promise) ? await cv : cv;
                             let mat = cv.imread(image);
+                            cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
 
                             imageList.push({
                                 name: file.name,
