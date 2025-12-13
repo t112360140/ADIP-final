@@ -11,9 +11,9 @@
         <div style="height:100%;width:100%;display:flex;flex-direction: column;align-items: center;">
             <span id="opencv-info">openCV.js 還沒準備好</span>
             <input id="image-input" type="file" accept="image/*" multiple disabled>
-            <div id="image-editor-canvas-div" style="position: relative;">
-                <canvas id="image-editor-canvas"></canvas>
-                <canvas id="image-editor-mask-canvas" style="position: absolute;top: 0;left: 0;"></canvas>
+            <div id="image-editor-canvas-div" style="position: relative; max-height: 90%;max-width:90%;">
+                <canvas id="image-editor-canvas" style="max-height: 100%;max-width:100%;"></canvas>
+                <canvas id="image-editor-mask-canvas" style="position: absolute;top: 0;left: 0;max-height: 100%;max-width:100%;"></canvas>
             </div>
             
             <div id="preview-image" style="width:100%;display:flex;flex-wrap: wrap;justify-content: center;align-content: flex-start;background:#f0f0f0;">

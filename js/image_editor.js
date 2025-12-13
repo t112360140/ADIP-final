@@ -26,7 +26,7 @@ image_editor_canvas_div.addEventListener('mouseup', (event)=>{
     if(image_editing_data.img){
         const pos={
             x: event.offsetX*(image_editing_data.img.width/image_editor_canvas_div.offsetWidth),
-            y:event.offsetY*(image_editing_data.img.height/image_editor_canvas_div.offsetHeight),
+            y: event.offsetY*(image_editing_data.img.height/image_editor_canvas_div.offsetHeight),
         };
         mouseData.isDown=false;
         mouseData.end=pos;
@@ -34,10 +34,15 @@ image_editor_canvas_div.addEventListener('mouseup', (event)=>{
         ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
 
         if(mouseData.start){
-            const rect=new cv.Rect(mouseData.start.x, mouseData.start.y, mouseData.end.x, mouseData.end.y);
-
-            if(image_editing_data.mode=MODE.GrabCut){
-                doGrabCut(rect);
+            const rect=new cv.Rect(
+                Math.min(mouseData.end.x,mouseData.start.x),
+                Math.min(mouseData.end.y,mouseData.start.y),
+                Math.abs(mouseData.end.x-mouseData.start.x),
+                Math.abs(mouseData.end.y-mouseData.start.y));
+            switch(image_editing_data.mode){
+                case MODE.GrabCut:
+                    if(confirm('確認執行計算?')) doGrabCut(rect);
+                    break;
             }
         }
     }
@@ -72,12 +77,17 @@ function setEditImage(image, mode){
 
 function doGrabCut(rect, iterCount=1){
     if(image_editing_data.img){
-        const src=image_editing_data.img.image;
+        let src=image_editing_data.img.image.mat_clone();
+        cv.resize(src, src, new cv.Size(512, 512*(src.rows/src.cols)), 0, 0, cv.INTER_AREA);
         let mask = new cv.Mat();
         let bgdModel = new cv.Mat();
         let fgdModel = new cv.Mat();
 
         cv.grabCut(src, mask, rect, bgdModel, fgdModel, iterCount, cv.GC_INIT_WITH_RECT);
+
+        cv.resize(mask, mask, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
+        cv.resize(bgdModel, bgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
+        cv.resize(fgdModel, fgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
 
         let output = src.mat_clone();
 
