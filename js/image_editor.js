@@ -89,7 +89,7 @@ function doGrabCut(rect, iterCount=1){
         cv.resize(bgdModel, bgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
         cv.resize(fgdModel, fgdModel, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
 
-        let output = src.mat_clone();
+        let output = image_editing_data.img.image.mat_clone();
 
         let outData = output.data;
         let maskData = mask.data;
@@ -108,6 +108,7 @@ function doGrabCut(rect, iterCount=1){
 
         cv.imshow(image_editor_canvas, output);
 
+        src.delete();
         mask.delete();
         bgdModel.delete();
         fgdModel.delete();
