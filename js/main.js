@@ -20,7 +20,7 @@ imageInput.addEventListener('change', async()=>{
                 await new Promise((r)=>{
                     image.onload=async function(){
                         cv = (cv instanceof Promise) ? await cv : cv;
-                        let mat = cv.imread(imgElement);
+                        let mat = cv.imread(image);
 
                         imageList.push({
                             name: file.name,
