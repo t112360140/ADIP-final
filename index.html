@@ -15,7 +15,10 @@
                 <canvas id="image-editor-mask-canvas" style="position: absolute;top: 0;left: 0;max-height: 100%;max-width:100%;"></canvas>
             </div>
             
-            <input id="image-input" type="file" accept="image/*" multiple disabled>
+            <div>
+                <input id="image-input" type="file" accept="image/*" multiple disabled>
+                <button onclick="loadExample();">Load Example</button>
+            </div>
             <div id="preview-image" style="width:100%;display:flex;flex-wrap: wrap;justify-content: center;align-content: flex-start;background:#f0f0f0;">
             </div>
         </div>

@@ -60,6 +60,42 @@ imageInput.addEventListener('change', async()=>{
     }
 });
 
+async function loadExample(){
+    if(window.cvReady){
+        for(let i=1;i<=8;i++){
+            for(let j=1;j<=2;j++){
+                const name=`${i}_${j}.jpg`;
+                const url=`dataset/${name}`;
+                const req=await fetch(url);
+                if(req.ok){
+                    const image=new Image();
+                    image.src=URL.createObjectURL(await req.blob());
+                    await new Promise((r)=>{
+                        image.onload=async function(){
+                            cv = (cv instanceof Promise) ? await cv : cv;
+                            let mat = cv.imread(image);
+                            cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
+
+                            imageList.push({
+                                name: name,
+                                image: mat,
+                                uuid: uuid(),
+                                type: TYPE.ORIGIN,
+                                height: image.height,
+                                width: image.width,
+                            });
+
+                            r();
+                        }
+                    });
+                    URL.revokeObjectURL(image.src);
+                }
+            }
+        }
+        fileUpdate();
+    }
+}
+
 function downloadMat(data){
     const canvas=document.createElement('canvas');
     cv.imshow(canvas, data.image);
