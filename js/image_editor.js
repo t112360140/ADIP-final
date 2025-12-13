@@ -30,9 +30,15 @@ image_editor_canvas_div.addEventListener('mouseup', (event)=>{
         };
         mouseData.isDown=false;
         mouseData.end=pos;
+        const ctx=image_editor_mask_canvas.getContext('2d');
+        ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
 
         if(mouseData.start){
+            const rect=new cv.Rect(mouseData.start.x, mouseData.start.y, mouseData.end.x, mouseData.end.y);
 
+            if(image_editing_data.mode=MODE.GrabCut){
+                doGrabCut(rect);
+            }
         }
     }
 });
@@ -61,4 +67,40 @@ function setEditImage(image, mode){
     cv.imshow(image_editor_canvas, image_editing_data.img.image);
     image_editor_mask_canvas.height=image_editor_canvas.height;
     image_editor_mask_canvas.width=image_editor_canvas.width;
+}
+
+
+function doGrabCut(rect, iterCount=2){
+    if(image_editing_data.img){
+        const src=image_editing_data.img.image;
+        let mask = new cv.Mat();
+        let bgdModel = new cv.Mat();
+        let fgdModel = new cv.Mat();
+
+        cv.grabCut(src, mask, rect, bgdModel, fgdModel, iterCount, cv.GC_INIT_WITH_RECT);
+
+        let output = src.mat_clone();
+
+        let outData = output.data;
+        let maskData = mask.data;
+        
+        let alpha = 0.6;
+        let beta = 1 - alpha;
+
+        for (let i = 0; i < maskData.length; i++) {
+            if (maskData[i] === 1 || maskData[i] === 3) {
+                let imgIdx = i * 4;
+                outData[imgIdx] = (outData[imgIdx] * beta) + (255 * alpha);
+                outData[imgIdx + 1] = outData[imgIdx + 1] * beta;
+                outData[imgIdx + 2] = outData[imgIdx + 2] * beta;
+            }
+        }
+
+        cv.imshow(image_editor_canvas, output);
+
+        mask.delete();
+        bgdModel.delete();
+        fgdModel.delete();
+        output.delete();
+    }
 }
