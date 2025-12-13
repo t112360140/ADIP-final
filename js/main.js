@@ -8,6 +8,15 @@ const TYPE={
 
 var imageList=[]
 
+var cvReady=false;
+const opencv_info=document.getElementById('opencv-info');
+function openCVReady(){
+    cvReady=true;
+
+    opencv_info.innerHTML='openCV.js 準備好了!!';
+    imageInput.disabled=false;
+}
+
 const imageInput=document.getElementById('image-input');
 imageInput.addEventListener('change', async()=>{
     try{

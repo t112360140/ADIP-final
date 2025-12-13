@@ -5,11 +5,12 @@
 
         <link rel="stylesheet" href="css/style.css">
 
-        <script async src="js/opencv.js" onload="window.cvReady=true;" type="text/javascript"></script>
+        <script async src="js/opencv.js" onload="openCVReady();" type="text/javascript"></script>
     </head>
     <body>
         <div style="height:100%;width:100%;display:flex;flex-direction: column;align-items: center;">
-            <input id="image-input" type="file" accept="image/*" multiple>
+            <span id="opencv-info">openCV.js 還沒準備好</span>
+            <input id="image-input" type="file" accept="image/*" multiple disabled>
             <div id="image-editor-canvas-div" style="position: relative;">
                 <canvas id="image-editor-canvas"></canvas>
                 <canvas id="image-editor-mask-canvas" style="position: absolute;top: 0;left: 0;"></canvas>
