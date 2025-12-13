@@ -83,6 +83,14 @@ function doGrabCut(rect, iterCount=1){
         let bgdModel = new cv.Mat();
         let fgdModel = new cv.Mat();
 
+        const scale=512/image_editing_data.img.image.cols;
+        rect=new Rect(
+            rect.x*scale,
+            rect.y*scale,
+            rect.width*scale,
+            rect.height*scale,
+        );
+
         cv.grabCut(src, mask, rect, bgdModel, fgdModel, iterCount, cv.GC_INIT_WITH_RECT);
 
         cv.resize(mask, mask, new cv.Size(image_editing_data.img.image.cols, image_editing_data.img.image.rows), 0, 0, cv.INTER_AREA);
