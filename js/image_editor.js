@@ -1,6 +1,7 @@
 const MODE={
     NOPE: 0,
     GrabCut: 1,
+    GrabCutAuto: 2,
 }
 
 var image_editing_data={};
@@ -75,7 +76,7 @@ function setEditImage(image, mode){
 }
 
 
-function doGrabCut(rect, iterCount=2){
+function doGrabCut(rect, iterCount=5){
     if(image_editing_data.img){
         let src=image_editing_data.img.image.mat_clone();
 
@@ -84,6 +85,8 @@ function doGrabCut(rect, iterCount=2){
         src.convertTo(newSrc, -1, 1.2, 0); // alpha=1.2 (對比度增加 20%), beta=0
         src.delete();
         src = newSrc;
+
+        cv.cvtColor(src, src, cv.COLOR_RGB2Lab);
 
         let mask = new cv.Mat();
         let bgdModel = new cv.Mat();
