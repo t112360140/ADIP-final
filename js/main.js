@@ -6,7 +6,17 @@ const TYPE={
     MASK: 3,
 }
 
+const MODE={
+    NOPE: 0,
+    GrabCut: 1,
+}
+
 var imageList=[]
+
+const image_editor_canvas = document.getElementById('image-editor-canvas');
+
+var image_editor_mode = MODE.NOPE;
+var image_editing_data={};
 
 const imageInput=document.getElementById('image-input');
 imageInput.addEventListener('change', async()=>{
@@ -55,6 +65,28 @@ function downloadMat(data){
     }, 'image/png');
 }
 
+function imageClone(data){
+    if (data === null || data === undefined || typeof data !== 'object')  {
+        return data;
+    }
+    if (data instanceof Array) {
+        var cloneA = [];
+        for (var i = 0; i < data.length; ++i) {
+            cloneA[i] = imageClone(data[i]);
+        }              
+        return cloneA;
+    }
+    if(data instanceof cv.Mat){
+        console.log(data)
+        return data.mat_clone();
+    }
+    var cloneO = {};
+    for (var i in data) {
+        cloneO[i] = imageClone(data[i]);
+    }                  
+    return cloneO;
+}
+
 const previewImage=document.getElementById('preview-image');
 function fileUpdate(){
     let html="";
@@ -64,6 +96,9 @@ function fileUpdate(){
         html+=`<div style="background: #A0A0A0;padding:10px;margin: 5px;display: flex;flex-direction: column;align-items: center;">
             <canvas id="image-preview-${data.uuid}" style="max-height:150px;max-width:150px;"></canvas><br>
             <span>${data.name}</span>
+            <div>
+                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="image_editing_data={img:};image_editor_mode = MODE.GrabCut;">下載</span>
+            </div>
             <div>
                 <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>
                 <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="if(confirm('確認刪除?')){if(imageList[${i}].image){imageList[${i}].image.delet();};imageList[${i}]=null; imageList=imageList.filter((v)=>(v!=null)); fileUpdate();}">刪除</span>
