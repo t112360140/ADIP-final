@@ -19,5 +19,5 @@ function setEditImage(image, mode){
         mode: MODE[mode],
     }
 
-    cv.imshow(image_editor_canvas, image_editing_data.img);
+    cv.imshow(image_editor_canvas, image_editing_data.img.image);
 }

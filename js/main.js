@@ -67,7 +67,6 @@ function imageClone(data){
         return cloneA;
     }
     if(data instanceof cv.Mat){
-        console.log(data)
         return data.mat_clone();
     }
     var cloneO = {};
