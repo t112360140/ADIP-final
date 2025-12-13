@@ -6,17 +6,10 @@ const TYPE={
     MASK: 3,
 }
 
-const MODE={
-    NOPE: 0,
-    GrabCut: 1,
-}
-
 var imageList=[]
 
 const image_editor_canvas = document.getElementById('image-editor-canvas');
 
-var image_editor_mode = MODE.NOPE;
-var image_editing_data={};
 
 const imageInput=document.getElementById('image-input');
 imageInput.addEventListener('change', async()=>{
@@ -73,7 +66,7 @@ function imageClone(data){
         var cloneA = [];
         for (var i = 0; i < data.length; ++i) {
             cloneA[i] = imageClone(data[i]);
-        }              
+        }
         return cloneA;
     }
     if(data instanceof cv.Mat){
@@ -87,6 +80,15 @@ function imageClone(data){
     return cloneO;
 }
 
+function removeImageFromList(index){
+    if(index<0&&imageList<=index) return;
+    if(imageList[index].image instanceof cv.Mat) imageList[index].image.delect();
+    imageList[index]=null;
+    imageList=imageList.filter(v=>v!==null);
+
+    fileUpdate();
+}
+
 const previewImage=document.getElementById('preview-image');
 function fileUpdate(){
     let html="";
@@ -97,11 +99,11 @@ function fileUpdate(){
             <canvas id="image-preview-${data.uuid}" style="max-height:150px;max-width:150px;"></canvas><br>
             <span>${data.name}</span>
             <div>
-                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="image_editing_data={img:};image_editor_mode = MODE.GrabCut;">下載</span>
+                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="setEditImage(imageList[${i}], MODE.GrabCut);">物件切割</span>
             </div>
             <div>
                 <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>
-                <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="if(confirm('確認刪除?')){if(imageList[${i}].image){imageList[${i}].image.delet();};imageList[${i}]=null; imageList=imageList.filter((v)=>(v!=null)); fileUpdate();}">刪除</span>
+                <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="if(confirm('確認刪除?')){removeImageFromList(${i});}">刪除</span>
             </div>
         </div>`
     }
