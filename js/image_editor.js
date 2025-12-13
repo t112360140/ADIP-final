@@ -30,6 +30,10 @@ image_editor_canvas_div.addEventListener('mouseup', (event)=>{
         };
         mouseData.isDown=false;
         mouseData.end=pos;
+
+        if(mouseData.start){
+
+        }
     }
 });
 image_editor_canvas_div.addEventListener('mousemove', (event)=>{
@@ -39,7 +43,7 @@ image_editor_canvas_div.addEventListener('mousemove', (event)=>{
             y:event.offsetY*(image_editing_data.img.height/image_editor_canvas_div.offsetHeight),
         };
         if(mouseData.isDown&&mouseData.start){
-            const ctx=image_editor_mask_canvas.getContent('2d');
+            const ctx=image_editor_mask_canvas.getContext('2d');
             ctx.strokeStyle='#ff0000';
             ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
             ctx.strokeRect(mouseData.start.x, mouseData.start.y, pos.x-mouseData.start.x, pos.y-mouseData.start.y);
