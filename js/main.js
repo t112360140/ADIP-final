@@ -10,36 +10,37 @@ var imageList=[]
 
 const imageInput=document.getElementById('image-input');
 imageInput.addEventListener('change', ()=>{
-    if(imageInput.files){
-        for(let i=0;i<imageInput.files.length;i++){
-            const file=imageInput.files[i];
-            const reader=new FileReader();
-            reader.onload=()=>{
-                const image=new Image();
-                image.src=reader.result;
-                image.onload=()=>{
-                    const canvas=document.createElement('canvas');
-                    canvas.height=image.height;
-                    canvas.width=image.width;
-                    const ctx=canvas.getContext('2d');
-                    ctx.drawImage(image, 0, 0);
+    if(window.cvReady){
+        if(imageInput.files){
+            let counter=0;
+            for(let i=0;i<imageInput.files.length;i++){
+                const file=imageInput.files[i];
+                const reader=new FileReader();
+                reader.onload=()=>{
+                    const image=new Image();
+                    image.src=reader.result;
+                    image.onload=async function(){
+                        cv = (cv instanceof Promise) ? await cv : cv;
+                        let mat = cv.imread(imgElement);
 
-                    const data=ctx.getImageData(0, 0, image.width, image.height);
-                    imageList.push({
-                        name: file.name,
-                        data: data,
-                        uuid: uuid(),
-                        type: TYPE.ORIGIN
-                    });
+                        imageList.push({
+                            name: file.name,
+                            image: mat,
+                            uuid: uuid(),
+                            type: TYPE.ORIGIN,
+                        });
 
-                    if(i>=imageInput.files.length-1){
-                        imageInput.value='';
-                        fileUpdate();
+                        if(++counter==imageInput.files.length){
+                            imageInput.value='';
+                            fileUpdate();
+                        }
                     }
                 }
+                reader.readAsDataURL(file);
             }
-            reader.readAsDataURL(file);
         }
+    }else{
+        alert("openCV還未準備好");
     }
 });
 
