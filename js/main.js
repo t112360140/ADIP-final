@@ -9,16 +9,15 @@ const TYPE={
 var imageList=[]
 
 const imageInput=document.getElementById('image-input');
-imageInput.addEventListener('change', ()=>{
+imageInput.addEventListener('change', async()=>{
     if(window.cvReady){
         if(imageInput.files){
             let counter=0;
             for(let i=0;i<imageInput.files.length;i++){
                 const file=imageInput.files[i];
-                const reader=new FileReader();
-                reader.onload=()=>{
-                    const image=new Image();
-                    image.src=reader.result;
+                const image=new Image();
+                image.src=URL.createObjectURL(file);
+                await new Promise((r)=>{
                     image.onload=async function(){
                         cv = (cv instanceof Promise) ? await cv : cv;
                         let mat = cv.imread(imgElement);
@@ -30,37 +29,22 @@ imageInput.addEventListener('change', ()=>{
                             type: TYPE.ORIGIN,
                         });
 
-                        if(++counter==imageInput.files.length){
-                            imageInput.value='';
-                            fileUpdate();
-                        }
+                        r();
                     }
-                }
-                reader.readAsDataURL(file);
+                });
+                URL.revokeObjectURL(image.src);
             }
+            imageInput.value='';
+            fileUpdate();
         }
     }else{
         alert("openCV還未準備好");
     }
 });
 
-function canvas2image(data){
+function downloadMat(data){
     const canvas=document.createElement('canvas');
-    canvas.height=data.height;
-    canvas.width=data.width;
-    const ctx=canvas.getContext('2d');
-    ctx.putImageData(data, 0, 0);
-
-    return canvas.toDataURL("image/png");
-}
-
-function downloadCanvas(data){
-    canvasData=data.data;
-    const canvas=document.createElement('canvas');
-    canvas.height=canvasData.height;
-    canvas.width=canvasData.width;
-    const ctx=canvas.getContext('2d');
-    ctx.putImageData(canvasData, 0, 0);
+    cv.imshow(canvas, data.image);
 
     canvas.toBlob((blob)=>{
         const a=document.createElement('a');
@@ -78,16 +62,23 @@ function fileUpdate(){
     for(let i=0;i<imageList.length;i++){
         const data=imageList[i];
         html+=`<div style="background: #A0A0A0;padding:10px;margin: 5px;display: flex;flex-direction: column;align-items: center;">
-            <img src="${canvas2image(data.data)}" style="max-height:150px;max-width:150px;"><br>
+            <canvas id="image-preview-${data.uuid}" style="max-height:150px;max-width:150px;"></canvas><br>
             <span>${data.name}</span>
             <div>
-                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadCanvas(imageList[${i}]);">下載</span>
-                <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="if(confirm('確認刪除?')){imageList[${i}]=null; imageList=imageList.filter((v)=>(v!=null)); fileUpdate();}">刪除</span>
+                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>
+                <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="if(confirm('確認刪除?')){if(imageList[${i}].image){imageList[${i}].image.delet();};imageList[${i}]=null; imageList=imageList.filter((v)=>(v!=null)); fileUpdate();}">刪除</span>
             </div>
         </div>`
     }
 
     previewImage.innerHTML=html;
+
+    setTimeout(()=>{
+        for(let i=0;i<imageList.length;i++){
+            const data=imageList[i];
+            cv.imshow(`image-preview-${data.uuid}`, data.image);
+        }
+    }, 100);
 }
 
 function uuid(length=8){
