@@ -13,8 +13,8 @@ const image_editor_mask_canvas = document.getElementById('image-editor-mask-canv
 image_editor_canvas_div.addEventListener('mousedown', (event)=>{
     if(image_editing_data.img){
         const pos={
-            x: event.offsetX*(image_editing_data.img.image.width/image_editor_canvas.offsetWidth),
-            y:event.offsetY*(image_editing_data.img.image.height/image_editor_canvas.offsetHeight),
+            x: event.offsetX*(image_editing_data.img.width/image_editor_canvas.offsetWidth),
+            y:event.offsetY*(image_editing_data.img.height/image_editor_canvas.offsetHeight),
         };
         console.log(pos);
     }
@@ -22,8 +22,8 @@ image_editor_canvas_div.addEventListener('mousedown', (event)=>{
 image_editor_canvas_div.addEventListener('mouseup', (event)=>{
     if(image_editing_data.img){
         const pos={
-            x: event.offsetX*(image_editing_data.img.image.width/image_editor_canvas.offsetWidth),
-            y:event.offsetY*(image_editing_data.img.image.height/image_editor_canvas.offsetHeight),
+            x: event.offsetX*(image_editing_data.img.width/image_editor_canvas.offsetWidth),
+            y:event.offsetY*(image_editing_data.img.height/image_editor_canvas.offsetHeight),
         };
         console.log(pos);
     }

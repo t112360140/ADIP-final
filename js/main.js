@@ -28,6 +28,8 @@ imageInput.addEventListener('change', async()=>{
                                 image: mat,
                                 uuid: uuid(),
                                 type: TYPE.ORIGIN,
+                                height: image.height,
+                                width: image.width,
                             });
 
                             r();
