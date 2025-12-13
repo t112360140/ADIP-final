@@ -5,15 +5,28 @@ const MODE={
 
 var image_editing_data={};
 
+const image_editor_canvas_div = document.getElementById('image-editor-canvas-div');
 const image_editor_canvas = document.getElementById('image-editor-canvas');
 const image_editor_mask_canvas = document.getElementById('image-editor-mask-canvas');
 
 
-image_editor_canvas.addEventListener('mousedown', (event)=>{
-    console.log(event.offsetX, event.offsetY, image_editor_canvas.offsetHeight, image_editor_canvas.offsetWidth);
+image_editor_canvas_div.addEventListener('mousedown', (event)=>{
+    if(image_editing_data.img){
+        const pos={
+            x: event.offsetX*(image_editing_data.img.image.width/image_editor_canvas.offsetWidth),
+            y:event.offsetY*(image_editing_data.img.image.height/image_editor_canvas.offsetHeight),
+        };
+        console.log(pos);
+    }
 });
-image_editor_canvas.addEventListener('mouseup', (event)=>{
-    console.log(event.offsetX, event.offsetY, image_editor_canvas.offsetHeight, image_editor_canvas.offsetWidth);
+image_editor_canvas_div.addEventListener('mouseup', (event)=>{
+    if(image_editing_data.img){
+        const pos={
+            x: event.offsetX*(image_editing_data.img.image.width/image_editor_canvas.offsetWidth),
+            y:event.offsetY*(image_editing_data.img.image.height/image_editor_canvas.offsetHeight),
+        };
+        console.log(pos);
+    }
 });
 
 function setEditImage(image, mode){
@@ -24,4 +37,6 @@ function setEditImage(image, mode){
     }
 
     cv.imshow(image_editor_canvas, image_editing_data.img.image);
+    image_editor_mask_canvas.height=image_editor_canvas.height;
+    image_editor_mask_canvas.width=image_editor_canvas.width;
 }

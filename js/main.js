@@ -10,35 +10,40 @@ var imageList=[]
 
 const imageInput=document.getElementById('image-input');
 imageInput.addEventListener('change', async()=>{
-    if(window.cvReady){
-        if(imageInput.files){
-            let counter=0;
-            for(let i=0;i<imageInput.files.length;i++){
-                const file=imageInput.files[i];
-                const image=new Image();
-                image.src=URL.createObjectURL(file);
-                await new Promise((r)=>{
-                    image.onload=async function(){
-                        cv = (cv instanceof Promise) ? await cv : cv;
-                        let mat = cv.imread(image);
+    try{
+        if(window.cvReady){
+            if(imageInput.files){
+                let counter=0;
+                for(let i=0;i<imageInput.files.length;i++){
+                    const file=imageInput.files[i];
+                    const image=new Image();
+                    image.src=URL.createObjectURL(file);
+                    await new Promise((r)=>{
+                        image.onload=async function(){
+                            cv = (cv instanceof Promise) ? await cv : cv;
+                            let mat = cv.imread(image);
 
-                        imageList.push({
-                            name: file.name,
-                            image: mat,
-                            uuid: uuid(),
-                            type: TYPE.ORIGIN,
-                        });
+                            imageList.push({
+                                name: file.name,
+                                image: mat,
+                                uuid: uuid(),
+                                type: TYPE.ORIGIN,
+                            });
 
-                        r();
-                    }
-                });
-                URL.revokeObjectURL(image.src);
+                            r();
+                        }
+                    });
+                    URL.revokeObjectURL(image.src);
+                }
+                imageInput.value='';
+                fileUpdate();
             }
+        }else{
+            alert("openCV還未準備好");
             imageInput.value='';
-            fileUpdate();
         }
-    }else{
-        alert("openCV還未準備好");
+    }catch(e){
+        alert("錯誤!");
         imageInput.value='';
     }
 });
