@@ -60,36 +60,44 @@ imageInput.addEventListener('change', async()=>{
     }
 });
 
+const exampleList=[
+    '1_1.jpg', '1_2.jpg',
+    '2_1.jpg', '2_2.jpg',
+    '3_1.png', '3_2.png',
+    '4_1.jpg', '4_2.jpg',
+    '5_1.jpg', '5_2.jpg',
+    '6_1.jpg', '6_2.jpg',
+    '7_1.jpg', '7_2.jpg',
+    '8_1.jpg', '8_2.jpg',
+];
 async function loadExample(){
     if(window.cvReady){
-        for(let i=1;i<=8;i++){
-            for(let j=1;j<=2;j++){
-                const name=`${i}_${j}.jpg`;
-                const url=`dataset/${name}`;
-                const req=await fetch(url);
-                if(req.ok){
-                    const image=new Image();
-                    image.src=URL.createObjectURL(await req.blob());
-                    await new Promise((r)=>{
-                        image.onload=async function(){
-                            cv = (cv instanceof Promise) ? await cv : cv;
-                            let mat = cv.imread(image);
-                            cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
+        for(let i=0;i<exampleList.length;i++){
+            const name=exampleList[i];
+            const url=`dataset/${name}`;
+            const req=await fetch(url);
+            if(req.ok){
+                const image=new Image();
+                image.src=URL.createObjectURL(await req.blob());
+                await new Promise((r)=>{
+                    image.onload=async function(){
+                        cv = (cv instanceof Promise) ? await cv : cv;
+                        let mat = cv.imread(image);
+                        cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
 
-                            imageList.push({
-                                name: name,
-                                image: mat,
-                                uuid: uuid(),
-                                type: TYPE.ORIGIN,
-                                height: image.height,
-                                width: image.width,
-                            });
+                        imageList.push({
+                            name: name,
+                            image: mat,
+                            uuid: uuid(),
+                            type: TYPE.ORIGIN,
+                            height: image.height,
+                            width: image.width,
+                        });
 
-                            r();
-                        }
-                    });
-                    URL.revokeObjectURL(image.src);
-                }
+                        r();
+                    }
+                });
+                URL.revokeObjectURL(image.src);
             }
         }
         fileUpdate();
