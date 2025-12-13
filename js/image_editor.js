@@ -75,7 +75,7 @@ function setEditImage(image, mode){
 }
 
 
-function doGrabCut(rect, iterCount=1){
+function doGrabCut(rect, iterCount=2){
     if(image_editing_data.img){
         let src=image_editing_data.img.image.mat_clone();
         cv.resize(src, src, new cv.Size(512, 512*(src.rows/src.cols)), 0, 0, cv.INTER_AREA);
@@ -84,7 +84,7 @@ function doGrabCut(rect, iterCount=1){
         let fgdModel = new cv.Mat();
 
         const scale=512/image_editing_data.img.image.cols;
-        rect=new Rect(
+        rect=new cv.Rect(
             rect.x*scale,
             rect.y*scale,
             rect.width*scale,
