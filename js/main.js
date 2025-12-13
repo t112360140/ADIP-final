@@ -10,8 +10,9 @@ var imageList=[]
 
 var cvReady=false;
 const opencv_info=document.getElementById('opencv-info');
-function openCVReady(){
+async function openCVReady(){
     cvReady=true;
+    cv = (cv instanceof Promise) ? await cv : cv;
 
     opencv_info.innerHTML='openCV.js 準備好了!!';
     imageInput.disabled=false;
@@ -102,9 +103,7 @@ async function addImageToList(name, blob){
     image.src=URL.createObjectURL(blob);
     await new Promise((r)=>{
         image.onload=async function(){
-            cv = (cv instanceof Promise) ? await cv : cv;
             let mat = cv.imread(image);
-            cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB, 0);
 
             imageList.push({
                 name: name,
@@ -123,7 +122,7 @@ async function addImageToList(name, blob){
 
 function removeImageFromList(index){
     if(index<0&&imageList<=index) return;
-    if(imageList[index].image instanceof cv.Mat) imageList[index].image.delect();
+    if(imageList[index].image instanceof cv.Mat) imageList[index].image.delete();
     imageList[index]=null;
     imageList=imageList.filter(v=>v!==null);
 
@@ -140,8 +139,10 @@ function fileUpdate(){
             <canvas id="image-preview-${data.uuid}" style="max-height:150px;max-width:150px;"></canvas><br>
             <span>${data.name}</span>
             <div>
-                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="setEditImage(imageList[${i}], 'GrabCut');">手動切割</span>
-                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="setEditImage(imageList[${i}], 'GrabCutAuto');">自動切割</span>
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCut');" title="使用方塊標記要選取的物件">方框選取</span>
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutPen');" title="使用畫筆標記要選取的物件">畫筆選取</span><br>
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutAuto');" title="從影像(10, 10, width-10, height-10) 中找出物件">自動選取</span>
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutPeople');" title="使用人臉找出物件">人物選取</span>
             </div>
             <div>
                 <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>
@@ -154,8 +155,10 @@ function fileUpdate(){
 
     setTimeout(()=>{
         for(let i=0;i<imageList.length;i++){
-            const data=imageList[i];
-            cv.imshow(`image-preview-${data.uuid}`, data.image);
+            try{
+                const data=imageList[i];
+                cv.imshow(`image-preview-${data.uuid}`, data.image);
+            }catch(e){}
         }
     }, 100);
 }
