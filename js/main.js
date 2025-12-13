@@ -39,6 +39,7 @@ imageInput.addEventListener('change', async()=>{
         }
     }else{
         alert("openCV還未準備好");
+        imageInput.value='';
     }
 });
 
