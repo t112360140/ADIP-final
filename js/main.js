@@ -99,7 +99,7 @@ function fileUpdate(){
             <canvas id="image-preview-${data.uuid}" style="max-height:150px;max-width:150px;"></canvas><br>
             <span>${data.name}</span>
             <div>
-                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="setEditImage(imageList[${i}], MODE.GrabCut);">物件切割</span>
+                <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="setEditImage(imageList[${i}], 'GrabCut');">物件切割</span>
             </div>
             <div>
                 <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>

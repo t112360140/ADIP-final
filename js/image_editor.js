@@ -9,7 +9,7 @@ function setEditImage(image, mode){
     if(!MODE[mode]) return;
     image_editing_data={
         img: imageClone(image),
-        mode: mode,
+        mode: MODE[mode],
     }
 
     cv.imshow(image_editor_canvas, image_editing_data.img);
