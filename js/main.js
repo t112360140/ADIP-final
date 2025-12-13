@@ -8,9 +8,6 @@ const TYPE={
 
 var imageList=[]
 
-const image_editor_canvas = document.getElementById('image-editor-canvas');
-
-
 const imageInput=document.getElementById('image-input');
 imageInput.addEventListener('change', async()=>{
     if(window.cvReady){
