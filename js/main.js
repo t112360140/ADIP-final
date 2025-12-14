@@ -52,6 +52,7 @@ const exampleList=[
 ];
 async function loadExample(){
     if(window.cvReady){
+        let task=newTask('下載範例', `進度: 0/${exampleList.legth}`);
         for(let i=0;i<exampleList.length;i++){
             const name=exampleList[i];
             const url=`dataset/${name}`;
@@ -59,8 +60,11 @@ async function loadExample(){
             if(req.ok){
                 await addImageToList(name, await req.blob())
             }
+            task.update(null, `進度: ${i+1}/${exampleList.legth}`, (i+1)/exampleList.legth);
         }
         fileUpdate();
+        task.remove();
+        task=null;
     }
 }
 
