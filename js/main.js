@@ -98,6 +98,20 @@ function imageClone(data){
     return cloneO;
 }
 
+function deepImageRemove(data){
+    if (data === null || data === undefined || typeof data !== 'object') return;
+    if(data instanceof cv.Mat){
+        try{data.delete();}catch(e){console.warn('刪除Mat錯誤',e);}
+        return;
+    }
+    if (data instanceof Array) {
+        for (var i = 0; i < data.length; ++i) deepImageRemove(data[i]);
+        return;
+    }
+    for (var i in data) deepImageRemove(data[i]);
+    return;
+}
+
 async function addImageToList(name, blob){
     const image=new Image();
     image.src=URL.createObjectURL(blob);
@@ -122,12 +136,40 @@ async function addImageToList(name, blob){
 
 function removeImageFromList(index){
     if(index<0&&imageList<=index) return;
-    if(imageList[index].image instanceof cv.Mat) imageList[index].image.delete();
-    imageList[index]=null;
+    const sibling=findUUID(imageList[index].sibling).sibling;
+    if(sibling.length>0){
+        for(let i=0;i<sibling.length;i++){
+            if(imageList[sibling[i].index].image instanceof cv.Mat) imageList[sibling[i].index].image.delete();
+            imageList[sibling[i].index]=null;
+        }
+    }else{
+        if(imageList[index].image instanceof cv.Mat) imageList[index].image.delete();
+        imageList[index]=null;
+    }
     imageList=imageList.filter(v=>v!==null);
 
     fileUpdate();
 }
+
+function findUUID(uuid){
+    let index=-1;
+    let child=[];
+    let sibling=[];
+    for(let i=0;i<imageList.length;i++){
+        if(imageList[i].uuid==uuid) index=i;
+        if(imageList[i].parent==uuid) child.push({index: i, data: imageList[i]});
+        if(imageList[i].sibling==uuid) sibling.push({index: i, data: imageList[i]});
+    }
+    return {
+        index: index,
+        child: child,
+        sibling: sibling,
+    };
+}
+
+// function getUUIDTree(){
+//     let 
+// }
 
 const previewImage=document.getElementById('preview-image');
 function fileUpdate(){
@@ -136,7 +178,7 @@ function fileUpdate(){
     for(let i=0;i<imageList.length;i++){
         const data=imageList[i];
         html+=`<div style="background: #A0A0A0;padding:10px;margin: 5px;display: flex;flex-direction: column;align-items: center;">
-            <canvas id="image-preview-${data.uuid}" style="max-height:150px;max-width:150px;"></canvas><br>
+            <canvas id="image-preview-${data.uuid}" onclick="setEditImage(imageList[${i}], 'View');" style="max-height:150px;max-width:150px;" title="UUID: ${data.uuid}\nParent: ${data.parent}\nSibling: ${data.sibling}\nHeight: ${data.height}\nWidth: ${data.width}"></canvas><br>
             <span>${data.name}</span>
             <div>
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCut');" title="使用方塊標記要選取的物件">方框選取</span>
@@ -145,8 +187,12 @@ function fileUpdate(){
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutPeople');" title="使用人臉找出物件">人物選取</span>
             </div>
             <div>
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'Merge');" title="檢查是否有分解過的影像，並且新增">合併影像</span>
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'MergeSingle');" title="直接新增影像">合併影像(單獨)</span>
+            </div>
+            <div>
                 <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>
-                <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="if(confirm('確認刪除?')){removeImageFromList(${i});}">刪除</span>
+                <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="${(data.sibling)?"if(confirm('前景、遮罩、背景都會被刪除!\\n確認刪除?')){removeImageFromList("+i+");}":"if(confirm('確認刪除?')){removeImageFromList("+i+");}"}">刪除</span>
             </div>
         </div>`
     }

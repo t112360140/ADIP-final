@@ -4,10 +4,15 @@ var GrabCutIterCount=2;
 
 const MODE={
     NOPE: 0,
-    GrabCut: 1,
-    GrabCutPen: 2,
-    GrabCutPeople: 3,
-    GrabCutAuto: 4,
+    GrabCut: 11,
+    GrabCutPen: 21,
+    GrabCutPeople: 31,
+    GrabCutAuto: 41,
+
+    Merge: 12,
+    MergeSingle: 22,
+
+    View: 91,
 }
 
 var image_editing_data={};
@@ -95,40 +100,68 @@ image_editor_canvas_div.addEventListener('mousemove', (event)=>{
 
 
 const editMenu={
-    GrabCut: document.getElementById('GrabCut-mode'),
+    GrabCut: document.getElementById('GrabCut-menu'),
+    Merge: document.getElementById('Merge-menu'),
 };
-function setEditImage(image, mode){
+function setEditImage(image, mode, config={}){
     if(MODE[mode]==null){
         console.warn(`Mode: ${mode} not exist!`);
         return;
-    }
-    
-    for(const key in image_editing_data){
-        if(image_editing_data[key] instanceof cv.Mat) image_editing_data[key].delete()
     }
 
     if(MODE[mode]===MODE.NOPE){
         const ctx=image_editor_canvas.getContext('2d');
         ctx.clearRect(0, 0, image_editor_canvas.width, image_editor_canvas.height);
+        deepImageRemove(image_editing_data);
         image_editing_data={};
         for(const key in editMenu) editMenu[key].style.display='none';
         return;
     }
 
-    image_editing_data={
-        img: imageClone(image),
-        mode: MODE[mode],
-
-        mask: null,
-        bgdModel: null,
-        fgdModel: null,
-        grabCutFirst:false,
-        grabCutAdd: 0,
+    if(image_editing_data.mode==MODE.Merge&&MODE[mode]%10!=2){
+        deepImageRemove(image_editing_data);
+        image_editing_data={};
     }
 
-    cv.imshow(image_editor_canvas, image_editing_data.img.image);
-    image_editor_mask_canvas.height=image_editor_canvas.height;
-    image_editor_mask_canvas.width=image_editor_canvas.width;
+    switch(MODE[mode]%10){
+        case 1:
+            deepImageRemove(image_editing_data);
+            image_editing_data={
+                img: imageClone(image),
+                mode: MODE[mode],
+
+                mask: null,
+                bgdModel: null,
+                fgdModel: null,
+                grabCutFirst:false,
+                grabCutAdd: 0,
+            };
+            break;
+        case 2:
+            if(image_editing_data.mode!=MODE.Merge){
+                deepImageRemove(image_editing_data);
+                image_editing_data={
+                    mode: MODE.Merge,
+
+                    layer:[],
+                    adjust:[],
+                };
+            }
+            break;
+        case 9:
+            deepImageRemove(image_editing_data);
+            image_editing_data={
+                img: imageClone(image),
+                mode: MODE[mode],
+            };
+            break;
+    }
+
+    if(!config.dontDraw){
+        if(MODE[mode]%10!==2) cv.imshow(image_editor_canvas, image_editing_data.img.image);
+        image_editor_mask_canvas.height=image_editor_canvas.height;
+        image_editor_mask_canvas.width=image_editor_canvas.width;
+    }
 
     for(const key in editMenu) editMenu[key].style.display='none';
     switch(MODE[mode]){
@@ -163,6 +196,59 @@ function setEditImage(image, mode){
             );
             opencv_info.innerHTML='標記想要添加的部分';
             break;
+
+        case MODE.Merge:
+            editMenu.Merge.style.display='block';
+            const findData=findUUID(image.uuid);
+            if(findData.child.length>0){
+                if(confirm("是否載入分解過的影像?\n"+image.name)){
+                    let backIndex=[];
+                    let objectIndex=[];
+                    for(let i=0;i<findData.child.length;i++){
+                        if(findData.child[i].data.type==TYPE.BACKGROUND) backIndex.push(i);
+                        else if(findData.child[i].data.type==TYPE.OBJECT) objectIndex.push(i);
+                    }
+                    if(backIndex.length>0){
+                        if(objectIndex.length>0&&confirm("是否順便載入此背景的前景元素?\n"+image.name)){
+                            setEditImage(findData.child[backIndex[0]].data, 'Merge', {dontDraw:true});
+                            setEditImage(findData.child[objectIndex[0]].data, 'Merge', {dontDraw:true});
+                        }else{
+                            if(confirm("找不到前景元素。\n指使用背景元素?\n"+image.name)){
+                                setEditImage(findData.child[backIndex[0]].data, 'MergeSingle');
+                            }else{
+                                setEditImage(image, 'MergeSingle');
+                            }
+                        }
+                    }else{
+                        setEditImage(image, 'MergeSingle');
+                    }
+                }else{
+                    setEditImage(image, 'MergeSingle');
+                }
+            }else{
+                setEditImage(image, 'MergeSingle');
+            }
+            break;
+        case MODE.MergeSingle:
+            editMenu.Merge.style.display='block';
+            const data=imageClone(image);
+            let base=null;
+            for(let i=0;i<image_editing_data.adjust.length;i++){
+                if(image_editing_data.adjust[i].base) base=image_editing_data.adjust[i];
+                break;
+            }
+            const scale_=base?Math.min(base.w/image.width, base.h/image.height, 1):1;
+            image_editing_data.layer.push(data);
+            image_editing_data.adjust.push({
+                x: 0, y: 0,
+                w: Math.floor(image.width*scale_), h: Math.floor(image.height*scale_),
+                base: (base==null),
+            });
+            if(!config.dontDraw){
+                updateMergeLayerSelect(image.uuid);
+                drawMergeImage();
+            }
+            break;
     }
 }
 
@@ -195,7 +281,7 @@ async function doGrabCutWithFace(){
         faceCascade.load('haarcascade_frontalface_default.xml');
         let msize = new cv.Size(0, 0);
         faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0, msize, msize);
-        for (let i = 0; i < faces.size(); ++i) {
+        for (let i = 0; i < faces.size();i++) {
             let h=faces.get(i).height;
             let w=faces.get(i).width;
             let x=Math.max(faces.get(i).x-w, 1);
@@ -277,18 +363,19 @@ function doGrabCut(rect, iterCount=2){
 
         if(set2Width>0) cv.resize(src, src, new cv.Size(set2Width, set2Width*(src.rows/src.cols)), 0, 0, cv.INTER_AREA);
         let newSrc = new cv.Mat();
-        src.convertTo(newSrc, -1, 1.5, 0); // alpha=1.2 (對比度增加 20%), beta=0
+        src.convertTo(newSrc, -1, 1, 0); // alpha=1 (對比度增加 0%), beta=0
         src.delete();
         src = newSrc;
 
-        cv.cvtColor(src, src, cv.COLOR_RGBA2RGB, 0);
+        cv.cvtColor(src, src, cv.COLOR_RGBA2RGB);
         cv.cvtColor(src, src, cv.COLOR_RGB2Lab);
 
         try {
             cv.grabCut(src, image_editing_data.mask, rect, image_editing_data.bgdModel, image_editing_data.fgdModel, iterCount, mode);
         } catch (err) {
             console.error("GrabCut Error:", err);
-            src.delete(); 
+            src.delete();
+            alert("異常錯誤");
             return;
         }
 
@@ -333,6 +420,7 @@ function addGrabCut(pos, size=3){
 }
 
 function saveGrabCut(){
+    const uuid_=uuid();
     if(image_editing_data.grabCutFirst){
         let output = image_editing_data.img.image.mat_clone();
         let outputBack = image_editing_data.img.image.mat_clone();
@@ -359,20 +447,47 @@ function saveGrabCut(){
             if(channels==4) outMaskData[imgIdx+3]=255;
         }
 
-        // 修補背景
-        const kernelSize = 5;
-        const inpaintRadius = 3;
-        let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
-        let dst = new cv.Mat();
-        let tempMask = resizeMask.mat_clone();
-        cv.dilate(resizeMask, tempMask, kernel);
-        cv.cvtColor(outputBack, outputBack, cv.COLOR_RGBA2RGB, 0);
-        cv.inpaint(outputBack, tempMask, dst, inpaintRadius, cv.INPAINT_TELEA);    // cv.INPAINT_NS
-        outputBack.delete();
-        outputBack = dst;
-        cv.cvtColor(outputBack, outputBack, cv.COLOR_RGB2RGBA, 0);
-        tempMask.delete();
-        resizeMask.delete();
+        if(image_editing_data.img.type==TYPE.ORIGIN){
+            // let transparent=new cv.Mat(outputBack.rows, outputBack.cols, cv.CV_8UC1, new cv.Scalar(0));
+            // let channels = outputBack.channels();
+            // for(let i=0;i<transparent.data.length.length;i++){
+            //     transparent.data[i]=outBackData[i*channels+3];
+            // }
+
+            // 修補背景
+            const kernelSize = 15;
+            let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
+            let tempMask = resizeMask.mat_clone();
+            cv.dilate(resizeMask, tempMask, kernel);
+            // const inpaintRadius = 3;
+            // let dst = new cv.Mat();
+            // cv.cvtColor(outputBack, outputBack, cv.COLOR_RGBA2RGB, 0);
+            // cv.inpaint(outputBack, tempMask, dst, inpaintRadius, cv.INPAINT_TELEA);    // cv.INPAINT_NS
+            // outputBack.delete();
+            // outputBack = dst;
+            // cv.cvtColor(outputBack, outputBack, cv.COLOR_RGB2RGBA, 0);
+
+            imageList.push({
+                name: "back_"+image_editing_data.img.name,
+                image: inpaintFunction(cv, image_editing_data.img.image, tempMask),
+                uuid: uuid(),
+                type: TYPE.BACKGROUND,
+                height: image_editing_data.img.height,
+                width: image_editing_data.img.width,
+                parent: image_editing_data.img.uuid,
+                sibling: uuid_,
+            });
+
+            
+            // outBackData = outputBack.data;
+            // for(let i=0;i<transparent.data.length.length;i++){
+            //     outBackData[i*channels+3]=transparent.data[i];
+            // }
+
+            tempMask.delete();
+            resizeMask.delete();
+            // transparent.delete();
+        }
         
         imageList.push({
             name: "object_"+image_editing_data.img.name,
@@ -381,15 +496,19 @@ function saveGrabCut(){
             type: TYPE.OBJECT,
             height: image_editing_data.img.height,
             width: image_editing_data.img.width,
+            parent: image_editing_data.img.uuid,
+            sibling: uuid_,
         });
-        imageList.push({
-            name: "back_"+image_editing_data.img.name,
-            image: outputBack,
-            uuid: uuid(),
-            type: TYPE.BACKGROUND,
-            height: image_editing_data.img.height,
-            width: image_editing_data.img.width,
-        });
+        // imageList.push({
+        //     name: "back_"+image_editing_data.img.name,
+        //     image: outputBack,
+        //     uuid: uuid(),
+        //     type: TYPE.BACKGROUND,
+        //     height: image_editing_data.img.height,
+        //     width: image_editing_data.img.width,
+        //     parent: image_editing_data.img.uuid,
+        //     sibling: uuid_,
+        // });
         imageList.push({
             name: "mask_"+image_editing_data.img.name,
             image: outputMask,
@@ -397,9 +516,88 @@ function saveGrabCut(){
             type: TYPE.MASK,
             height: image_editing_data.img.height,
             width: image_editing_data.img.width,
+            parent: image_editing_data.img.uuid,
+            sibling: uuid_,
         });
         fileUpdate();
     }else{
         alert("請先選取物件");
+    }
+}
+
+
+
+
+
+
+
+const merge_layer_select = document.getElementById('merge-layer-select');
+function updateMergeLayerSelect(select){
+    if(image_editing_data.layer){
+        let selectOut='';
+        const selected=select??merge_layer_select.value;
+        for(let i=0;i<image_editing_data.layer.length;i++){
+            selectOut=`<option value="${image_editing_data.layer[i].uuid}"${(image_editing_data.layer[i].uuid===selected)?' selected':''}>${image_editing_data.layer[i].name}</option>`+selectOut;
+        }
+        merge_layer_select.innerHTML=selectOut;
+    }
+}
+
+function removeMergeLayer(index){
+    if(0<=index&&index<image_editing_data.layer.length){
+        image_editing_data.layer[index].image.delete();
+        image_editing_data.layer[index]=null;
+        const isBase=image_editing_data.adjust[index].base;
+        image_editing_data.adjust[index]=null;
+        image_editing_data.layer=image_editing_data.layer.filter(v=>v!=null);
+        image_editing_data.adjust=image_editing_data.adjust.filter(v=>v!=null);
+        if(isBase&&image_editing_data.adjust.length>0) image_editing_data.adjust[0].base=true;
+
+        updateMergeLayerSelect();
+        drawMergeImage();
+    }
+}
+
+function drawMergeImage(){
+    if(image_editing_data.layer){
+        let base=null;
+        for(let i=0;i<image_editing_data.layer.length;i++){
+            if(image_editing_data.adjust[i].base) base=image_editing_data.adjust[i];
+            break;
+        }
+        if(!base){
+            setEditImage(null, 'NOPE');
+            return;
+        }
+        let output=new cv.Mat(base.h, base.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
+        let outputData=output.data;
+        for(let i=0;i<image_editing_data.layer.length;i++){
+            const h=image_editing_data.adjust[i].h;
+            const w=image_editing_data.adjust[i].w;
+            const x=image_editing_data.adjust[i].x;
+            const y=image_editing_data.adjust[i].y;
+
+            let img=image_editing_data.layer[i].image.mat_clone();
+            cv.resize(img, img, new cv.Size(w, h), 0, 0, cv.INTER_AREA);
+            const data=img.data;
+            for(let j=0;j<data.length/4;j++){
+                const x_=x+j%w-base.x;
+                const y_=Math.floor(y+j/w)-base.y;
+
+                if(0<=x_&&x_<base.w&&0<=y_&&y_<base.h){
+                    const outIdx=(y_*base.w+x_)*4;
+                    const imgIdx=j*4;
+                    const a = data[imgIdx+3]/255, b = 1-a;
+                    outputData[outIdx] = outputData[outIdx] * b * outputData[outIdx + 3]/255 + data[imgIdx] * a;
+                    outputData[outIdx + 1] = outputData[outIdx + 1] * b * outputData[outIdx + 3]/255 + data[imgIdx+1] * a;
+                    outputData[outIdx + 2] = outputData[outIdx + 2] * b * outputData[outIdx + 3]/255 + data[imgIdx+2] * a;
+                    outputData[outIdx + 3] = Math.max(outputData[outIdx + 3], data[imgIdx+3]);
+                }
+            }
+            img.delete();
+        }
+
+        cv.imshow(image_editor_canvas, output);
+        output.delete();
     }
 }
