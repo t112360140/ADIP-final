@@ -448,8 +448,8 @@ function saveGrabCut(){
             if(channels==4) outMaskData[imgIdx+3]=255;
         }
 
-        if(image_editing_data.img.type==TYPE.ORIGIN){
-            if(false){
+        if(image_editing_data.img.type==TYPE.ORIGIN && confirm('是否要修補背景?')){
+            if(confirm('使用PatchMatch修補?\n選擇"否"將使用OpenCV進行修補。')){
                 let transparent=new cv.Mat(outputBack.rows, outputBack.cols, cv.CV_8UC1, new cv.Scalar(0));
                 let channels = outputBack.channels();
                 for(let i=0;i<transparent.data.length.length;i++){
