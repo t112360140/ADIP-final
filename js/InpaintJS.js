@@ -713,8 +713,8 @@ function buildInpaintTask(cv, srcImage, maskImage, callback){
 
                 if (command === 'inpaint-result'&& _uuid==uuid_) {
                     const { rows, cols, type, dataLength } = data.resultMetadata;
-                    const data = new Uint8Array(data.resultBuffer);
-                    const resultRGBA = new cv.matFromArray(rows, cols, type, data);
+                    const dataBuffer = new Uint8Array(data.resultBuffer);
+                    const resultRGBA = new cv.matFromArray(rows, cols, type, dataBuffer);
                     
                     close();
                     resolve(resultRGBA);

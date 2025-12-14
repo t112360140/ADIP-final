@@ -423,8 +423,9 @@ class InpaintJS {
 
     expectationMaximization(src, target, offset_T2S, level) {
         let iterEM;
-        if (level === 0) iterEM = 15;
+        if (level === 0) iterEM = 5;
         else iterEM = 3 + level;
+        iterEM = 5 + level;
         let iterNNF = Math.min(5, 1 + level);
         
         let newTargetImg = null;
