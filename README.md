@@ -7,3 +7,4 @@
 - [影像修復2-1](https://gfx.cs.princeton.edu/pubs/Barnes_2009_PAR/patchmatch.pdf)
 - [影像修復2-2](https://github.com/liqing7/Inpaint)
 - [影像修復2-3](https://www.cnblogs.com/Imageshop/p/18373906)
+- [影像修復2-4](https://wenfulee.github.io/CS-766-Computer-Vision/)

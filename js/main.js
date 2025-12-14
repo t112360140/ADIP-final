@@ -180,17 +180,17 @@ function fileUpdate(){
         html+=`<div style="background: #A0A0A0;padding:10px;margin: 5px;display: flex;flex-direction: column;align-items: center;">
             <canvas id="image-preview-${data.uuid}" onclick="setEditImage(imageList[${i}], 'View');" style="max-height:150px;max-width:150px;" title="UUID: ${data.uuid}\nParent: ${data.parent}\nSibling: ${data.sibling}\nHeight: ${data.height}\nWidth: ${data.width}"></canvas><br>
             <span>${data.name}</span>
-            <div>
+            <div style="border: 2px solid black;padding: 3px;">
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCut');" title="使用方塊標記要選取的物件">方框選取</span>
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutPen');" title="使用畫筆標記要選取的物件">畫筆選取</span><br>
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutAuto');" title="從影像(10, 10, width-10, height-10) 中找出物件">自動選取</span>
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutPeople');" title="使用人臉找出物件">人物選取</span>
             </div>
-            <div>
+            <div style="border: 2px solid black;padding: 3px;">
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'Merge');" title="檢查是否有分解過的影像，並且新增">合併影像</span>
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'MergeSingle');" title="直接新增影像">合併影像(單獨)</span>
             </div>
-            <div>
+            <div style="border: 2px solid black;padding: 3px;">
                 <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>
                 <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="${(data.sibling)?"if(confirm('前景、遮罩、背景都會被刪除!\\n確認刪除?')){removeImageFromList("+i+");}":"if(confirm('確認刪除?')){removeImageFromList("+i+");}"}">刪除</span>
             </div>

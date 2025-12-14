@@ -1,3 +1,55 @@
+importScripts('opencv.js');
+
+let inited=false;
+if(!inited) {
+    self.postMessage({ command: 'init'});
+    inited=true;
+}
+self.onmessage = function(event) {
+    if (!cv) {
+        self.postMessage({ command: 'error', error: 'OpenCV.js not initialized.' });
+        return;
+    }
+
+    const { command, uuid, data } = event.data;
+
+    if (command === 'inpaint') {
+        try {
+            const srcData = new Uint8Array(data.srcBuffer);
+            const srcImage = new cv.matFromArray(data.src.rows, data.src.cols, data.src.type, srcData);
+
+            const maskData = new Uint8Array(data.maskBuffer);
+            const maskImage = new cv.matFromArray(data.mask.rows, data.mask.cols, data.mask.type, maskData);
+
+            const resultRGBA = inpaintFunction(cv, srcImage, maskImage, uuid);
+
+            let resultBuffer = resultRGBA.data.slice().buffer;
+            const resultMetadata = {
+                rows: resultRGBA.rows,
+                cols: resultRGBA.cols,
+                type: resultRGBA.type(),
+                dataLength: resultRGBA.data.length
+            };
+
+            self.postMessage({
+                command: 'inpaint-result',
+                uuid: uuid,
+                data: {
+                    resultBuffer: resultBuffer,
+                    resultMetadata: resultMetadata
+                }
+            }, [resultBuffer]);
+
+            resultRGBA.delete();
+
+        } catch (e) {
+            console.error(e);
+            self.postMessage({ command: 'error', uuid: uuid, error: e.toString() });
+        }
+    }
+};
+
+
 class InpaintJS {
     constructor(cv, src, mask) {
         this.cv = cv;
@@ -91,9 +143,7 @@ class InpaintJS {
         }
     }
 
-    run() {
-        const startTime = new Date().getTime();
-
+    run(uuid) {
         this.buildPyr();
 
         let index = this.srcImg.length - 1;
@@ -104,7 +154,7 @@ class InpaintJS {
             // 使用之前優化的：只保留 TargetToSource
             let offset_T2S = this.offsetMap_TargetToSource[index];
 
-            console.log(`Processing Level: ${index}, Size: ${srcObj.cols}x${srcObj.rows}`);
+            postMessage({command: 'inpaint-status', uuid: uuid, data:{level: index, process: ((this.srcImg.length-1-index)/this.srcImg.length), size: [srcObj.cols, srcObj.rows]}});
 
             if (index === this.srcImg.length - 1) {
                 // Top Level Initialization
@@ -167,8 +217,6 @@ class InpaintJS {
             }
         }
         // ------------------------------------
-
-        console.log(`Inpaint Finish. Takes: ${new Date().getTime()-startTime}ms`);
 
         this.cleanUp();
         return result;
@@ -615,7 +663,7 @@ class InpaintJS {
  * @param {cv.Mat} maskImage - Mask image (CV_8UC1, 255 = remove)
  * @returns {cv.Mat} Inpainted image (CV_8UC4)
  */
-function inpaintFunction(cv, srcImage, maskImage) {
+function inpaintFunction(cv, srcImage, maskImage, uuid) {
     if (srcImage.type() !== cv.CV_8UC4) {
         console.error("Input source must be CV_8UC4 (RGBA)");
         return srcImage.mat_clone();
@@ -629,7 +677,7 @@ function inpaintFunction(cv, srcImage, maskImage) {
 
     // 2. Run Inpaint Logic
     let inpainter = new InpaintJS(cv, srcLab, maskImage);
-    let resultLab = inpainter.run();
+    let resultLab = inpainter.run(uuid);
 
     // 3. Convert Result RGB back to RGBA
     let resultRGB = new cv.Mat();
@@ -658,83 +706,4 @@ function inpaintFunction(cv, srcImage, maskImage) {
     alpha.delete();
 
     return resultRGBA;
-}
-
-
-
-
-
-let workerReady=false;
-let inpaintWorker=null;
-if (window.Worker) {
-    inpaintWorker=new Worker('js/InpaintJS.worker.js');
-    inpaintWorker.onmessage=(event)=>{
-        if(event.data.command=='init')
-            workerReady=true;
-    }
-}
-function buildInpaintTask(cv, srcImage, maskImage, callback){
-    return new Promise((resolve, reject) => {
-        if(workerReady&&inpaintWorker){
-            if (srcImage.type() !== cv.CV_8UC4) {
-                return reject(new Error("Input source must be CV_8UC4 (RGBA)"));
-            }
-            const uuid_=uuid();
-
-            let srcBuffer = srcImage.data.slice().buffer;
-            const srcMetadata = {
-                rows: srcImage.rows,
-                cols: srcImage.cols,
-                type: srcImage.type(),
-                dataLength: srcImage.data.length
-            };
-
-            let maskBuffer = maskImage.data.slice().buffer;
-            const maskMetadata = {
-                rows: maskImage.rows,
-                cols: maskImage.cols,
-                type: maskImage.type(),
-                dataLength: maskImage.data.length
-            };
-
-            inpaintWorker.postMessage({
-                command: 'inpaint',
-                uuid: uuid_,
-                data: {
-                    src: srcMetadata,
-                    mask: maskMetadata,
-                    srcBuffer: srcBuffer,
-                    maskBuffer: maskBuffer
-                },
-            }, [srcBuffer, maskBuffer]); 
-
-            function onMessage(event) {
-                const { command, uuid: _uuid, data, error } = event.data;
-
-                if (command === 'inpaint-result'&& _uuid==uuid_) {
-                    const { rows, cols, type, dataLength } = data.resultMetadata;
-                    const data = new Uint8Array(data.resultBuffer);
-                    const resultRGBA = new cv.matFromArray(rows, cols, type, data);
-                    
-                    close();
-                    resolve(resultRGBA);
-                }else if(command === 'inpaint-status'&& _uuid==uuid_){
-                    if(callback instanceof Function) callback(data);
-                }else if(error && _uuid==uuid_) {
-                    close();
-                    reject(new Error(error));
-                }
-            };
-            function close(){
-                inpaintWorker.removeEventListener('message', onMessage);
-            }
-            inpaintWorker.addEventListener('message', onMessage);
-
-            inpaintWorker.addEventListener('error', (e)=>{
-                reject(e);
-            }, {once: true});
-        }else{
-            reject('Worker not Ready.');
-        }
-    });
 }

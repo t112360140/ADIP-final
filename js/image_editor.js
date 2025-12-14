@@ -220,6 +220,7 @@ function setEditImage(image, mode, config={}){
                             }
                         }
                     }else{
+                        alert('找不到背景影像，直接載入原始圖片');
                         setEditImage(image, 'MergeSingle');
                     }
                 }else{
@@ -448,45 +449,70 @@ function saveGrabCut(){
         }
 
         if(image_editing_data.img.type==TYPE.ORIGIN){
-            // let transparent=new cv.Mat(outputBack.rows, outputBack.cols, cv.CV_8UC1, new cv.Scalar(0));
-            // let channels = outputBack.channels();
-            // for(let i=0;i<transparent.data.length.length;i++){
-            //     transparent.data[i]=outBackData[i*channels+3];
-            // }
+            if(false){
+                let transparent=new cv.Mat(outputBack.rows, outputBack.cols, cv.CV_8UC1, new cv.Scalar(0));
+                let channels = outputBack.channels();
+                for(let i=0;i<transparent.data.length.length;i++){
+                    transparent.data[i]=outBackData[i*channels+3];
+                }
 
-            // 修補背景
-            const kernelSize = 15;
-            let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
-            let tempMask = resizeMask.mat_clone();
-            cv.dilate(resizeMask, tempMask, kernel);
-            // const inpaintRadius = 3;
-            // let dst = new cv.Mat();
-            // cv.cvtColor(outputBack, outputBack, cv.COLOR_RGBA2RGB, 0);
-            // cv.inpaint(outputBack, tempMask, dst, inpaintRadius, cv.INPAINT_TELEA);    // cv.INPAINT_NS
-            // outputBack.delete();
-            // outputBack = dst;
-            // cv.cvtColor(outputBack, outputBack, cv.COLOR_RGB2RGBA, 0);
+                // 修補背景
+                const kernelSize = 15;
+                let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
+                let tempMask = resizeMask.mat_clone();
+                cv.dilate(resizeMask, tempMask, kernel);
+                const inpaintRadius = 3;
+                let dst = new cv.Mat();
+                cv.cvtColor(outputBack, outputBack, cv.COLOR_RGBA2RGB, 0);
+                cv.inpaint(outputBack, tempMask, dst, inpaintRadius, cv.INPAINT_TELEA);    // cv.INPAINT_NS
+                outputBack.delete();
+                outputBack = dst;
+                cv.cvtColor(outputBack, outputBack, cv.COLOR_RGB2RGBA, 0);
 
-            imageList.push({
-                name: "back_"+image_editing_data.img.name,
-                image: inpaintFunction(cv, image_editing_data.img.image, tempMask),
-                uuid: uuid(),
-                type: TYPE.BACKGROUND,
-                height: image_editing_data.img.height,
-                width: image_editing_data.img.width,
-                parent: image_editing_data.img.uuid,
-                sibling: uuid_,
-            });
+                outBackData = outputBack.data;
+                for(let i=0;i<transparent.data.length.length;i++){
+                    outBackData[i*channels+3]=transparent.data[i];
+                }
+                tempMask.delete();
+                transparent.delete();
+                
+                imageList.push({
+                    name: "back_"+image_editing_data.img.name,
+                    image: outputBack,
+                    uuid: uuid(),
+                    type: TYPE.BACKGROUND,
+                    height: image_editing_data.img.height,
+                    width: image_editing_data.img.width,
+                    parent: image_editing_data.img.uuid,
+                    sibling: uuid_,
+                });
+            }else{
+                let task=newTask("圖像修復", `任務UUID: ${uuid_}`);
+                buildInpaintTask(cv, image_editing_data.img.image, resizeMask, (data)=>{
+                    console.log(`Processing Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`);
+                    task.update(null, `任務UUID: ${uuid_}<br>Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`, data.process);
+                }).then((data)=>{
+                    imageList.push({
+                        name: "back_"+image_editing_data.img.name,
+                        image: data,
+                        uuid: uuid(),
+                        type: TYPE.BACKGROUND,
+                        height: image_editing_data.img.height,
+                        width: image_editing_data.img.width,
+                        parent: image_editing_data.img.uuid,
+                        sibling: uuid_,
+                    });
+                    fileUpdate();
+                    task.remove();
+                    task=null;
+                }).catch((err)=>{
+                    console.error(err);
+                    task.remove();
+                    task=null;
+                });
+            }
 
-            
-            // outBackData = outputBack.data;
-            // for(let i=0;i<transparent.data.length.length;i++){
-            //     outBackData[i*channels+3]=transparent.data[i];
-            // }
-
-            tempMask.delete();
             resizeMask.delete();
-            // transparent.delete();
         }
         
         imageList.push({
@@ -499,16 +525,6 @@ function saveGrabCut(){
             parent: image_editing_data.img.uuid,
             sibling: uuid_,
         });
-        // imageList.push({
-        //     name: "back_"+image_editing_data.img.name,
-        //     image: outputBack,
-        //     uuid: uuid(),
-        //     type: TYPE.BACKGROUND,
-        //     height: image_editing_data.img.height,
-        //     width: image_editing_data.img.width,
-        //     parent: image_editing_data.img.uuid,
-        //     sibling: uuid_,
-        // });
         imageList.push({
             name: "mask_"+image_editing_data.img.name,
             image: outputMask,

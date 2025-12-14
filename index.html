@@ -8,6 +8,7 @@
         <link rel="stylesheet" href="css/style.css">
 
         <script src="js/InpaintJS.js"></script>
+        <script src="js/taskBoard.js"></script>
     </head>
     <body>
         <div style="height:100%;width:100%;display:flex;flex-direction: column;align-items: center;">
@@ -56,6 +57,12 @@
                 <button onclick="loadExample();">Load Example</button>
             </div>
             <div id="preview-image" style="width:100%;display:flex;flex-wrap: wrap;justify-content: center;align-content: flex-start;background:#f0f0f0;">
+            </div>
+        </div>
+
+        <div style="position: absolute;top: 0;right: 0;max-height:50%;max-width:50%;">
+            <div id="task-board-button" style="position: absolute;top: 0;right: 0;height:30px;width: 50px; background: #f0a0a0;border: 2px solid black;display: flex;justify-content: center;align-items: center;cursor: pointer;">TASK</div>
+            <div id="task-board" style="display:none;max-height:100%;max-width:100%;min-height:100px;min-width:200px;background: #f0f0f0;border: 2px solid black;overflow-x:inherit;overflow-y: scroll;padding: 35px 5px 5px 5px;">
             </div>
         </div>
 
