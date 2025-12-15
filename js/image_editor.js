@@ -513,6 +513,17 @@ function saveGrabCut(){
             }
 
             resizeMask.delete();
+        }else{
+            imageList.push({
+                name: "back_"+image_editing_data.img.name,
+                image: outputBack,
+                uuid: uuid(),
+                type: TYPE.BACKGROUND,
+                height: image_editing_data.img.height,
+                width: image_editing_data.img.width,
+                parent: image_editing_data.img.uuid,
+                sibling: uuid_,
+            });
         }
         
         imageList.push({
@@ -577,13 +588,16 @@ function removeMergeLayer(index){
 function drawMergeImage(){
     if(image_editing_data.layer){
         let base=null;
-        for(let i=0;i<image_editing_data.layer.length;i++){
-            if(image_editing_data.adjust[i].base) base=image_editing_data.adjust[i];
-            break;
+        for(let i=0;i<image_editing_data.adjust.length;i++){
+            if(image_editing_data.adjust[i].base){
+                base=image_editing_data.adjust[i];
+                break;
+            }
         }
         if(!base){
-            setEditImage(null, 'NOPE');
-            return;
+            base=image_editing_data.adjust[0].base;
+            // setEditImage(null, 'NOPE');
+            // return;
         }
         let output=new cv.Mat(base.h, base.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
         let outputData=output.data;
@@ -617,3 +631,10 @@ function drawMergeImage(){
         output.delete();
     }
 }
+
+function moveItemInArray(arr, fromIndex, toIndex) {
+    const [removedItem] = arr.splice(fromIndex, 1);
+    arr.splice(toIndex, 0, removedItem);
+    return arr;
+}
+

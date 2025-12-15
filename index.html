@@ -41,6 +41,28 @@
                     <button onclick="
                             if(image_editing_data.layer){
                                 const index=image_editing_data.layer.length-merge_layer_select.selectedIndex-1;
+                                if(index<image_editing_data.layer.length-1){
+                                    moveItemInArray(image_editing_data.layer, index, index+1);
+                                    moveItemInArray(image_editing_data.adjust, index, index+1);
+                                    drawMergeImage();
+                                    updateMergeLayerSelect();
+                                }
+                            }
+                        ">^</button>
+                    <button onclick="
+                            if(image_editing_data.layer){
+                                const index=image_editing_data.layer.length-merge_layer_select.selectedIndex-1;
+                                if(index>0) {
+                                    moveItemInArray(image_editing_data.layer, index, index-1);
+                                    moveItemInArray(image_editing_data.adjust, index, index-1);
+                                    drawMergeImage();
+                                    updateMergeLayerSelect();
+                                }
+                            }
+                        ">v</button>
+                    <button onclick="
+                            if(image_editing_data.layer){
+                                const index=image_editing_data.layer.length-merge_layer_select.selectedIndex-1;
                                 if(confirm(`確認刪除: ${image_editing_data.layer[index].name}?`)){
                                     removeMergeLayer(index);
                                 }
