@@ -4,7 +4,7 @@ const TYPE={
     OBJECT: 1,
     BACKGROUND: 2,
     MASK: 3,
-    FIXED: 3,
+    FIXED: 4,
 }
 
 var imageList=[]
@@ -17,6 +17,7 @@ async function openCVReady(){
 
     opencv_info.innerHTML='openCV.js 準備好了!!';
     imageInput.disabled=false;
+    document.getElementById('image-example-btn').disabled=false;
 }
 
 const imageInput=document.getElementById('image-input');

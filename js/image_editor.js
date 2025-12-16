@@ -33,10 +33,21 @@ image_editor_canvas_div.addEventListener('mousedown', (event)=>{
         };
         mouseData.isDown=true;
         mouseData.start=pos;
-        image_editor_mask_canvas.height=image_editor_canvas.height;
-        image_editor_mask_canvas.width=image_editor_canvas.width;
-        const ctx=image_editor_mask_canvas.getContext('2d');
-        ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
+        if(image_editor_mask_canvas.height!=image_editor_canvas.height||image_editor_mask_canvas.width!=image_editor_canvas.width){
+            image_editor_mask_canvas.height=image_editor_canvas.height;
+            image_editor_mask_canvas.width=image_editor_canvas.width;
+        }
+        // const ctx=image_editor_mask_canvas.getContext('2d');
+        // ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
+    }else if(image_editing_data.mode&&image_editing_data.mode%10==2){
+        if(0<=image_editing_data.select&&image_editing_data.select<image_editing_data.layer.length){
+            const pos={
+                x: event.offsetX*(image_editing_data.width/image_editor_canvas_div.offsetWidth),
+                y:event.offsetY*(image_editing_data.height/image_editor_canvas_div.offsetHeight),
+            };
+            mouseData.isDown=true;
+            mouseData.start=pos;
+        }
     }
 });
 image_editor_canvas_div.addEventListener('mouseup', (event)=>{
@@ -76,7 +87,21 @@ image_editor_canvas_div.addEventListener('mouseup', (event)=>{
                     break;
             }
         }
+    }else if(image_editing_data.mode&&image_editing_data.mode%10==2){
+        if(mouseData.isDown&&mouseData.start&&0<=image_editing_data.select&&image_editing_data.select<image_editing_data.layer.length){
+            const pos={
+                x: event.offsetX*(image_editing_data.width/image_editor_canvas_div.offsetWidth),
+                y:event.offsetY*(image_editing_data.height/image_editor_canvas_div.offsetHeight),
+            };
+
+            const data=image_editing_data.adjust[image_editing_data.select];
+            data.x-=mouseData.start.x-pos.x;
+            data.y-=mouseData.start.y-pos.y;
+            
+            drawMergeImage();
+        }
     }
+    mouseData.isDown=false;
 });
 image_editor_canvas_div.addEventListener('mousemove', (event)=>{
     if(image_editing_data.img){
@@ -116,6 +141,17 @@ image_editor_canvas_div.addEventListener('mousemove', (event)=>{
             }
         }
     }
+});
+image_editor_canvas_div.addEventListener('wheel', (event)=>{
+    if(image_editing_data.mode&&image_editing_data.mode%10==2){
+        if(0<=image_editing_data.select&&image_editing_data.select<image_editing_data.layer.length&&
+            !image_editing_data.adjust[image_editing_data.select].base
+        ){
+            if(event.deltaY>0) resizeMergeImage(image_editing_data.select, 0.9);
+            else resizeMergeImage(image_editing_data.select, 1.1);
+            event.preventDefault();
+        }
+    }
 }); 
 
 
@@ -131,8 +167,10 @@ function setEditImage(image, mode, config={}){
     }
 
     if(MODE[mode]===MODE.NOPE){
-        const ctx=image_editor_canvas.getContext('2d');
+        let ctx=image_editor_canvas.getContext('2d');
         ctx.clearRect(0, 0, image_editor_canvas.width, image_editor_canvas.height);
+        ctx=image_editor_mask_canvas.getContext('2d');
+        ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
         deepImageRemove(image_editing_data);
         image_editing_data={};
         for(const key in editMenu) editMenu[key].style.display='none';
@@ -166,6 +204,9 @@ function setEditImage(image, mode, config={}){
 
                     layer:[],
                     adjust:[],
+                    select: -1,
+                    height:0,
+                    width:0,
                 };
             }
             break;
@@ -231,6 +272,25 @@ function setEditImage(image, mode, config={}){
             editMenu.Merge.style.display='block';
             const findData=findUUID(image.uuid);
             if(findData.child.length>0){
+                let fixed=[];
+                for(let i=0;i<findData.child.length;i++){
+                    if(findData.child[i].data.type==TYPE.FIXED) fixed.push({index: i, data: findData.child[i].data});
+                }
+                if(fixed.length>0&&confirm("找到修復過得影像，是否使用?\n"+fixed[0].data.name)){
+                    if(fixed.length>1){
+                        const ret=parseInt(prompt(`找到多個修復影像，請選擇要使用的:\n${fixed.map((v, i)=>((i+1).toString()+': '+v.data.uuid)).join('\n')}`));
+                        if(1<=ret&&ret<=fixed.length){
+                            setEditImage(fixed[ret-1].data, 'Merge');
+                            break;
+                        }else{
+                            alert('輸入錯誤，使用第一個');
+                            setEditImage(fixed[0].data, 'Merge');
+                            break;
+                        }
+                    }
+                    setEditImage(fixed[0].data, 'Merge');
+                    break;
+                }
                 if(confirm("是否載入分解過的影像?\n"+image.name)){
                     let backIndex=[];
                     for(let i=0;i<findData.child.length;i++){
@@ -278,6 +338,10 @@ function setEditImage(image, mode, config={}){
         case MODE.MergeSingle:
             editMenu.Merge.style.display='block';
             const data=imageClone(image);
+            if(image_editing_data.layer.length<=0){
+                image_editing_data.height=data.height;
+                image_editing_data.width=data.width;
+            }
             let base=null;
             for(let i=0;i<image_editing_data.adjust.length;i++){
                 if(image_editing_data.adjust[i].base) base=image_editing_data.adjust[i];
@@ -442,7 +506,7 @@ function doGrabCut(rect, iterCount=2){
 
         if(set2Width>0) cv.resize(src, src, new cv.Size(set2Width, set2Width*(src.rows/src.cols)), 0, 0, cv.INTER_AREA);
         let newSrc = new cv.Mat();
-        src.convertTo(newSrc, -1, 1, 0); // alpha=1 (對比度增加 0%), beta=0
+        src.convertTo(newSrc, -1, 1.2, 0); // alpha=1.2 (對比度增加 20%), beta=0
         src.delete();
         src = newSrc;
 
@@ -463,23 +527,23 @@ function doGrabCut(rect, iterCount=2){
         let outputMask = image_editing_data.mask.mat_clone();
         cv.resize(outputMask, outputMask, new cv.Size(output.cols, output.rows), 0, 0, cv.INTER_NEAREST);
 
+        cv.imshow(image_editor_canvas, output);
+
         let outData = output.data;
         let maskData = outputMask.data;
-        const channels = output.channels();
-        
-        let alpha = 0.6;
-        let beta = 1 - alpha;
 
         for (let i = 0; i < maskData.length; i++) {
+            outData[i*4 + 0] = 255;
+            outData[i*4 + 1] = 0;
+            outData[i*4 + 2] = 0;
             if (maskData[i] === cv.GC_FGD || maskData[i] === cv.GC_PR_FGD) {
-                let imgIdx = i * channels;
-                outData[imgIdx] = (outData[imgIdx] * beta) + (255 * alpha);
-                outData[imgIdx + 1] = outData[imgIdx + 1] * beta;
-                outData[imgIdx + 2] = outData[imgIdx + 2] * beta;
+                outData[i*4 + 3] = 128;
+            }else{
+                outData[i*4 + 3] = 0;
             }
         }
 
-        cv.imshow(image_editor_canvas, output);
+        cv.imshow(image_editor_mask_canvas, output);
 
         src.delete();
         output.delete();
@@ -526,7 +590,7 @@ function saveGrabCut(){
             if(channels==4) outMaskData[imgIdx+3]=255;
         }
 
-        if(image_editing_data.img.type==TYPE.ORIGIN && confirm('是否要修補背景?')){
+        if((image_editing_data.img.type==TYPE.ORIGIN||image_editing_data.img.type==TYPE.FIXED) && confirm('是否要修補背景?')){
             if(confirm('使用PatchMatch修補?\n選擇"否"將使用OpenCV進行修補。')){
                 let task=newTask("圖像修復", `任務UUID: ${uuid_}`);
                 buildInpaintTask(cv, image_editing_data.img.image, resizeMask, (data)=>{
@@ -694,12 +758,20 @@ function saveFixImage(){
 
 
 const merge_layer_select = document.getElementById('merge-layer-select');
+merge_layer_select.addEventListener('change', ()=>{
+    if(image_editing_data.mode%10==2){
+        image_editing_data.select=image_editing_data.layer.length-merge_layer_select.selectedIndex-1;
+
+        drawMergeImage();
+    }
+});
 function updateMergeLayerSelect(select){
     if(image_editing_data.layer){
         let selectOut='';
         const selected=select??merge_layer_select.value;
         for(let i=0;i<image_editing_data.layer.length;i++){
-            selectOut=`<option value="${image_editing_data.layer[i].uuid}"${(image_editing_data.layer[i].uuid===selected)?' selected':''}>${image_editing_data.layer[i].name}</option>`+selectOut;
+            selectOut=`<option value="${image_editing_data.layer[i].uuid}"${(image_editing_data.layer[i].uuid===selected)?' selected':''}>${image_editing_data.layer.length-i}: ${image_editing_data.layer[i].name}${image_editing_data.adjust[i].base?'*':''}</option>`+selectOut;
+            if(image_editing_data.layer[i].uuid===selected) image_editing_data.select=i;
         }
         merge_layer_select.innerHTML=selectOut;
     }
@@ -731,10 +803,131 @@ function drawMergeImage(){
         }
         if(!base){
             // base=image_editing_data.adjust[0].base;
+            alert('沒有照片了QQ');
             setEditImage(null, 'NOPE');
             return;
         }
         let output=new cv.Mat(base.h, base.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
+        let outputData=output.data;
+        let outputMask=null;
+        for(let i=0;i<image_editing_data.layer.length;i++){
+            const h=image_editing_data.adjust[i].h;
+            const w=image_editing_data.adjust[i].w;
+            const x=image_editing_data.adjust[i].x;
+            const y=image_editing_data.adjust[i].y;
+
+            if(image_editing_data.select==i) outputMask=new cv.Mat(base.h, base.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
+
+            let img=image_editing_data.layer[i].image.mat_clone();
+            cv.resize(img, img, new cv.Size(w, h), 0, 0, cv.INTER_AREA);
+            const data=img.data;
+            for(let j=0;j<outputData.length/4;j++){
+                const x_=j%base.w-x;
+                const y_=Math.floor(j/base.w)-y;
+
+                if(0<=x_&&x_<w&&0<=y_&&y_<h){
+                    const outIdx=j*4;
+                    const imgIdx=(y_*w+x_)*4;
+                    const a = data[imgIdx+3]/255, b = 1-a;
+                    outputData[outIdx] = outputData[outIdx] * b * outputData[outIdx + 3]/255 + data[imgIdx] * a;
+                    outputData[outIdx + 1] = outputData[outIdx + 1] * b * outputData[outIdx + 3]/255 + data[imgIdx+1] * a;
+                    outputData[outIdx + 2] = outputData[outIdx + 2] * b * outputData[outIdx + 3]/255 + data[imgIdx+2] * a;
+                    outputData[outIdx + 3] = Math.max(outputData[outIdx + 3], data[imgIdx+3]);
+                    if(image_editing_data.select==i) {
+                        outputMask.data[outIdx] = data[imgIdx];
+                        outputMask.data[outIdx+1] = data[imgIdx+1];
+                        outputMask.data[outIdx+2] = data[imgIdx+2];
+                        outputMask.data[outIdx+3] = data[imgIdx+3]*0.3;
+                    }
+                }
+            }
+            img.delete();
+        }
+
+        cv.imshow(image_editor_canvas, output);
+        output.delete();
+
+        if(outputMask!=null){
+            cv.imshow(image_editor_mask_canvas, outputMask);
+            outputMask.delete();
+        }
+    }
+}
+
+function moveItemInArray(arr, fromIndex, toIndex) {
+    const [removedItem] = arr.splice(fromIndex, 1);
+    arr.splice(toIndex, 0, removedItem);
+    return arr;
+}
+
+function changeMergeBase(index){
+    if(image_editing_data.layer){
+        if(!(0<=index&&index<image_editing_data.adjust.length)) return;
+        if(image_editing_data.adjust[index].base) return;
+        let base=null;
+        for(let i=0;i<image_editing_data.adjust.length;i++){
+            if(image_editing_data.adjust[i].base){
+                base={index:i, data: image_editing_data.adjust[i]};
+            }
+        }
+        if(base==null) return;
+
+        base.data.base=false;
+        base=image_editing_data.adjust[index];
+        base.x=0;
+        base.y=0;
+        base.h=image_editing_data.layer[index].image.rows;
+        base.w=image_editing_data.layer[index].image.cols;
+        base.base=true;
+        image_editing_data.height=base.h;
+        image_editing_data.width=base.w;
+
+        for(let i=0;i<image_editing_data.adjust.length;i++){
+            if(i!=index){
+                const scale=Math.min(
+                    base.w/image_editing_data.layer[i].image.cols,
+                    base.h/image_editing_data.layer[i].image.rows,
+                );
+
+                image_editing_data.adjust[i].x=0;
+                image_editing_data.adjust[i].y=0;
+                image_editing_data.adjust[i].h=Math.floor(image_editing_data.layer[i].image.rows*scale);
+                image_editing_data.adjust[i].w=Math.floor(image_editing_data.layer[i].image.cols*scale);
+            }
+        }
+
+        updateMergeLayerSelect();
+        drawMergeImage();
+    }
+}
+
+function resizeMergeImage(index, scale=0){
+    if(scale<=0) return;
+    if(image_editing_data.mode&&image_editing_data.mode%10==2){
+        if(0<=index&&index<image_editing_data.layer.length){
+            image_editing_data.adjust[index].h=Math.floor(image_editing_data.adjust[index].h*scale);
+            image_editing_data.adjust[index].w=Math.floor(image_editing_data.adjust[index].w*scale);
+
+            drawMergeImage();
+        }
+    }
+}
+
+function saveMergeImage(){
+    if(image_editing_data.layer){
+        let base=null;
+        for(let i=0;i<image_editing_data.adjust.length;i++){
+            if(image_editing_data.adjust[i].base){
+                base={index: i, data: image_editing_data.adjust[i]};
+                break;
+            }
+        }
+        if(!base){
+            alert('沒有照片了QQ');
+            setEditImage(null, 'NOPE');
+            return;
+        }
+        let output=new cv.Mat(base.data.h, base.data.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
         let outputData=output.data;
         for(let i=0;i<image_editing_data.layer.length;i++){
             const h=image_editing_data.adjust[i].h;
@@ -745,13 +938,13 @@ function drawMergeImage(){
             let img=image_editing_data.layer[i].image.mat_clone();
             cv.resize(img, img, new cv.Size(w, h), 0, 0, cv.INTER_AREA);
             const data=img.data;
-            for(let j=0;j<data.length/4;j++){
-                const x_=x+j%w-base.x;
-                const y_=Math.floor(y+j/w)-base.y;
+            for(let j=0;j<outputData.length/4;j++){
+                const x_=j%base.data.w-x;
+                const y_=Math.floor(j/base.data.w)-y;
 
-                if(0<=x_&&x_<base.w&&0<=y_&&y_<base.h){
-                    const outIdx=(y_*base.w+x_)*4;
-                    const imgIdx=j*4;
+                if(0<=x_&&x_<w&&0<=y_&&y_<h){
+                    const outIdx=j*4;
+                    const imgIdx=(y_*w+x_)*4;
                     const a = data[imgIdx+3]/255, b = 1-a;
                     outputData[outIdx] = outputData[outIdx] * b * outputData[outIdx + 3]/255 + data[imgIdx] * a;
                     outputData[outIdx + 1] = outputData[outIdx + 1] * b * outputData[outIdx + 3]/255 + data[imgIdx+1] * a;
@@ -762,14 +955,15 @@ function drawMergeImage(){
             img.delete();
         }
 
-        cv.imshow(image_editor_canvas, output);
-        output.delete();
+        imageList.push({
+            name: "merge_"+image_editing_data.layer[base.index].name,
+            image: output,
+            uuid: uuid(),
+            type: TYPE.ORIGIN,
+            height: base.h,
+            width: base.w,
+            parent: image_editing_data.layer[base.index].uuid,
+        });
+        fileUpdate();
     }
 }
-
-function moveItemInArray(arr, fromIndex, toIndex) {
-    const [removedItem] = arr.splice(fromIndex, 1);
-    arr.splice(toIndex, 0, removedItem);
-    return arr;
-}
-
