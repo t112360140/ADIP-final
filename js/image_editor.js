@@ -134,9 +134,9 @@ image_editor_canvas_div.addEventListener('mousemove', (event)=>{
                     const ctx=image_editor_mask_canvas.getContext('2d');
                     ctx.fillStyle='#ff0000';
                     ctx.beginPath();
-                    ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2, true);
+                    ctx.arc(pos.x, pos.y, image_editing_data.penW, 0, Math.PI * 2, true);
                     ctx.fill();
-                    cv.circle(image_editing_data.mask, new cv.Point(pos.x, pos.y), 3, new cv.Scalar(255), -1);
+                    cv.circle(image_editing_data.mask, new cv.Point(pos.x, pos.y), image_editing_data.penW, new cv.Scalar(255), -1);
                     break;
             }
         }
@@ -217,6 +217,7 @@ function setEditImage(image, mode, config={}){
                 mode: MODE[mode],
 
                 mask: null,
+                penW: 3,
             };
             break;
         case 9:
@@ -792,65 +793,78 @@ function removeMergeLayer(index){
     }
 }
 
-function drawMergeImage(){
-    if(image_editing_data.layer){
-        let base=null;
-        for(let i=0;i<image_editing_data.adjust.length;i++){
-            if(image_editing_data.adjust[i].base){
-                base=image_editing_data.adjust[i];
-                break;
-            }
+function drawMergeImage() {
+    if (!image_editing_data.layer) return;
+
+    // 1. 尋找 Base (背景) 以確定畫布大小
+    let base = image_editing_data.adjust.find(a => a.base);
+    if (!base) {
+        alert('沒有照片了QQ');
+        setEditImage(null, 'NOPE');
+        return;
+    }
+
+    // 建立離屏 Canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = base.w;
+    canvas.height = base.h;
+    const ctx = canvas.getContext('2d');
+
+    // 準備 Mask 用的 Canvas (如果有選取)
+    let maskCanvas = null;
+    let maskCtx = null;
+    if (image_editing_data.select !== undefined && image_editing_data.select !== -1) {
+        maskCanvas = document.createElement('canvas');
+        maskCanvas.width = base.w;
+        maskCanvas.height = base.h;
+        maskCtx = maskCanvas.getContext('2d');
+    }
+
+    // 2. 遍歷圖層並繪製
+    for (let i = 0; i < image_editing_data.layer.length; i++) {
+        const layerAdj = image_editing_data.adjust[i];
+        const w = layerAdj.w;
+        const h = layerAdj.h;
+        const x = layerAdj.x;
+        const y = layerAdj.y;
+
+        // 取得來源 Mat
+        let srcMat = image_editing_data.layer[i].image; // 假設這是 cv.Mat
+        
+        // --- 關鍵步驟：將 cv.Mat 轉為可繪製的物件 ---
+        // 為了讓 ctx.drawImage 使用，我們需要先將 Mat 轉為一個臨時 Canvas 
+        // 注意：這一步會產生一點開銷，但比手寫像素迴圈快
+        let tempCanvas = document.createElement('canvas');
+        cv.imshow(tempCanvas, srcMat); 
+
+        // --- 合成到主畫布 ---
+        // ctx.drawImage(image, dx, dy, dWidth, dHeight)
+        // Canvas 會自動處理縮放 (Resize) 和 Alpha 混合
+        ctx.drawImage(tempCanvas, x, y, w, h);
+
+        // --- 處理遮罩 (如果有被選中) ---
+        if (image_editing_data.select == i && maskCtx) {
+            // 你原本的邏輯是 alpha * 0.3
+            maskCtx.globalAlpha = 0.3; 
+            maskCtx.drawImage(tempCanvas, x, y, w, h);
+            maskCtx.globalAlpha = 1.0; // 還原
         }
-        if(!base){
-            // base=image_editing_data.adjust[0].base;
-            alert('沒有照片了QQ');
-            setEditImage(null, 'NOPE');
-            return;
-        }
-        let output=new cv.Mat(base.h, base.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
-        let outputData=output.data;
-        let outputMask=null;
-        for(let i=0;i<image_editing_data.layer.length;i++){
-            const h=image_editing_data.adjust[i].h;
-            const w=image_editing_data.adjust[i].w;
-            const x=image_editing_data.adjust[i].x;
-            const y=image_editing_data.adjust[i].y;
+        
+        // 釋放臨時 Canvas (雖然 JS 會 GC，但明確設為 null 是好習慣)
+        tempCanvas = null; 
+    }
 
-            if(image_editing_data.select==i) outputMask=new cv.Mat(base.h, base.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
+    // 3. (選擇性) 將合成結果轉回 cv.Mat
+    // 如果你之後還要用 cv.imshow 顯示，或者做其他 cv 處理
+    let output = cv.imread(canvas);
+    cv.imshow(image_editor_canvas, output);
+    output.delete(); // 顯示完就釋放
 
-            let img=image_editing_data.layer[i].image.mat_clone();
-            cv.resize(img, img, new cv.Size(w, h), 0, 0, cv.INTER_AREA);
-            const data=img.data;
-            for(let j=0;j<outputData.length/4;j++){
-                const x_=j%base.w-x;
-                const y_=Math.floor(j/base.w)-y;
-
-                if(0<=x_&&x_<w&&0<=y_&&y_<h){
-                    const outIdx=j*4;
-                    const imgIdx=(y_*w+x_)*4;
-                    const a = data[imgIdx+3]/255, b = 1-a;
-                    outputData[outIdx] = outputData[outIdx] * b * outputData[outIdx + 3]/255 + data[imgIdx] * a;
-                    outputData[outIdx + 1] = outputData[outIdx + 1] * b * outputData[outIdx + 3]/255 + data[imgIdx+1] * a;
-                    outputData[outIdx + 2] = outputData[outIdx + 2] * b * outputData[outIdx + 3]/255 + data[imgIdx+2] * a;
-                    outputData[outIdx + 3] = Math.max(outputData[outIdx + 3], data[imgIdx+3]);
-                    if(image_editing_data.select==i) {
-                        outputMask.data[outIdx] = data[imgIdx];
-                        outputMask.data[outIdx+1] = data[imgIdx+1];
-                        outputMask.data[outIdx+2] = data[imgIdx+2];
-                        outputMask.data[outIdx+3] = data[imgIdx+3]*0.3;
-                    }
-                }
-            }
-            img.delete();
-        }
-
-        cv.imshow(image_editor_canvas, output);
-        output.delete();
-
-        if(outputMask!=null){
-            cv.imshow(image_editor_mask_canvas, outputMask);
-            outputMask.delete();
-        }
+    // 處理 Mask 顯示
+    if (maskCanvas) {
+        let outputMask = cv.imread(maskCanvas);
+        cv.imshow(image_editor_mask_canvas, outputMask);
+        outputMask.delete();
     }
 }
 
@@ -914,56 +928,61 @@ function resizeMergeImage(index, scale=0){
 }
 
 function saveMergeImage(){
-    if(image_editing_data.layer){
-        let base=null;
-        for(let i=0;i<image_editing_data.adjust.length;i++){
-            if(image_editing_data.adjust[i].base){
-                base={index: i, data: image_editing_data.adjust[i]};
-                break;
-            }
-        }
-        if(!base){
-            alert('沒有照片了QQ');
-            setEditImage(null, 'NOPE');
-            return;
-        }
-        let output=new cv.Mat(base.data.h, base.data.w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 0));
-        let outputData=output.data;
-        for(let i=0;i<image_editing_data.layer.length;i++){
-            const h=image_editing_data.adjust[i].h;
-            const w=image_editing_data.adjust[i].w;
-            const x=image_editing_data.adjust[i].x;
-            const y=image_editing_data.adjust[i].y;
+    if (!image_editing_data.layer) return;
 
-            let img=image_editing_data.layer[i].image.mat_clone();
-            cv.resize(img, img, new cv.Size(w, h), 0, 0, cv.INTER_AREA);
-            const data=img.data;
-            for(let j=0;j<outputData.length/4;j++){
-                const x_=j%base.data.w-x;
-                const y_=Math.floor(j/base.data.w)-y;
-
-                if(0<=x_&&x_<w&&0<=y_&&y_<h){
-                    const outIdx=j*4;
-                    const imgIdx=(y_*w+x_)*4;
-                    const a = data[imgIdx+3]/255, b = 1-a;
-                    outputData[outIdx] = outputData[outIdx] * b * outputData[outIdx + 3]/255 + data[imgIdx] * a;
-                    outputData[outIdx + 1] = outputData[outIdx + 1] * b * outputData[outIdx + 3]/255 + data[imgIdx+1] * a;
-                    outputData[outIdx + 2] = outputData[outIdx + 2] * b * outputData[outIdx + 3]/255 + data[imgIdx+2] * a;
-                    outputData[outIdx + 3] = Math.max(outputData[outIdx + 3], data[imgIdx+3]);
-                }
-            }
-            img.delete();
-        }
-
-        imageList.push({
-            name: "merge_"+image_editing_data.layer[base.index].name,
-            image: output,
-            uuid: uuid(),
-            type: TYPE.ORIGIN,
-            height: base.h,
-            width: base.w,
-            parent: image_editing_data.layer[base.index].uuid,
-        });
-        fileUpdate();
+    // 1. 尋找 Base (背景) 以確定畫布大小
+    let baseIndex=0;
+    let base = image_editing_data.adjust.find((a, i) =>{baseIndex=i;return a.base;});
+    if (!base) {
+        alert('沒有照片了QQ');
+        setEditImage(null, 'NOPE');
+        return;
     }
+
+    // 建立離屏 Canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = base.w;
+    canvas.height = base.h;
+    const ctx = canvas.getContext('2d');
+
+    // 2. 遍歷圖層並繪製
+    for (let i = 0; i < image_editing_data.layer.length; i++) {
+        const layerAdj = image_editing_data.adjust[i];
+        const w = layerAdj.w;
+        const h = layerAdj.h;
+        const x = layerAdj.x;
+        const y = layerAdj.y;
+
+        // 取得來源 Mat
+        let srcMat = image_editing_data.layer[i].image; // 假設這是 cv.Mat
+        
+        // --- 關鍵步驟：將 cv.Mat 轉為可繪製的物件 ---
+        // 為了讓 ctx.drawImage 使用，我們需要先將 Mat 轉為一個臨時 Canvas 
+        // 注意：這一步會產生一點開銷，但比手寫像素迴圈快
+        let tempCanvas = document.createElement('canvas');
+        cv.imshow(tempCanvas, srcMat); 
+
+        // --- 合成到主畫布 ---
+        // ctx.drawImage(image, dx, dy, dWidth, dHeight)
+        // Canvas 會自動處理縮放 (Resize) 和 Alpha 混合
+        ctx.drawImage(tempCanvas, x, y, w, h);
+        
+        // 釋放臨時 Canvas (雖然 JS 會 GC，但明確設為 null 是好習慣)
+        tempCanvas = null; 
+    }
+
+    // 3. (選擇性) 將合成結果轉回 cv.Mat
+    // 如果你之後還要用 cv.imshow 顯示，或者做其他 cv 處理
+    let output = cv.imread(canvas);
+
+    imageList.push({
+        name: "merge_"+image_editing_data.layer[baseIndex].name,
+        image: output,
+        uuid: uuid(),
+        type: TYPE.ORIGIN,
+        height: base.h,
+        width: base.w,
+        parent: image_editing_data.layer[baseIndex].uuid,
+    });
+    fileUpdate();
 }
