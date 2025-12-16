@@ -595,8 +595,9 @@ function saveGrabCut(){
             if(confirm('使用PatchMatch修補?\n選擇"否"將使用OpenCV進行修補。')){
                 let task=newTask("圖像修復", `任務UUID: ${uuid_}`);
                 buildInpaintTask(cv, image_editing_data.img.image, resizeMask, (data)=>{
-                    console.log(`Processing Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`);
-                    task.update(null, `任務UUID: ${uuid_}<br>Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`, data.process);
+                    // console.log(`Processing Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`);
+                    // task.update(null, `任務UUID: ${uuid_}<br>Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`, data.process);
+                    task.update(null, `任務UUID: ${uuid_}<br>進度: ${Math.round(data.process*100)}%`, data.process);
                 }).then((data)=>{
                     imageList.push({
                         name: "back_"+image_editing_data.img.name,
@@ -616,6 +617,17 @@ function saveGrabCut(){
                     task.remove();
                     task=null;
                 });
+                
+                // imageList.push({
+                //     name: "back_"+image_editing_data.img.name,
+                //     image: cv.image_complete_js(image_editing_data.img.image, resizeMask),
+                //     uuid: uuid(),
+                //     type: TYPE.BACKGROUND,
+                //     height: image_editing_data.img.height,
+                //     width: image_editing_data.img.width,
+                //     parent: image_editing_data.img.uuid,
+                //     sibling: uuid_,
+                // });
             }else{
                 let transparent=new cv.Mat(outputBack.rows, outputBack.cols, cv.CV_8UC1, new cv.Scalar(0));
                 let channels = outputBack.channels();

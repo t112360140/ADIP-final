@@ -21,7 +21,14 @@ self.onmessage = function(event) {
             const maskData = new Uint8Array(data.maskBuffer);
             const maskImage = new cv.matFromArray(data.mask.rows, data.mask.cols, data.mask.type, maskData);
 
-            const resultRGBA = inpaintFunction(cv, srcImage, maskImage, uuid);
+            // const resultRGBA = inpaintFunction(cv, srcImage, maskImage, uuid);
+
+            const kernelSize = 3;
+            let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
+            cv.dilate(maskImage, maskImage, kernel);
+            kernel.delete();
+
+            const resultRGBA = cv.image_complete_js(srcImage, maskImage);
 
             let resultBuffer = resultRGBA.data.slice().buffer;
             const resultMetadata = {
