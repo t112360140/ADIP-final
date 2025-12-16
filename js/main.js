@@ -196,7 +196,7 @@ function fileUpdate(){
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'GrabCutPeople');" title="使用人臉找出物件">人物選取</span>
             </div>
             <div style="border: 2px solid black;padding: 3px;">
-                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'PhotoFix');" title="修復破損的照片">照片修復</span>
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'PhotoFix');" title="手動修復破損的照片">手動修復</span>
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'PhotoFixWhite');" title="修復破損的照片，使用白色部分作為遮罩">摺痕修復</span>
             </div>
             <div style="border: 2px solid black;padding: 3px;">
