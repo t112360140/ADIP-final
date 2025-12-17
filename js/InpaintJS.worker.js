@@ -22,9 +22,12 @@ self.onmessage = function(event) {
 
             // const resultRGBA = inpaintFunction(cv, srcImage, maskImage, uuid);
 
-            const resultRGBA = cv.image_complete_js(srcImage, maskImage, 30, (progress)=>{
-                postMessage({command: 'inpaint-status', uuid: uuid, data:{process: progress}});
-            });
+            const kernelSize = 3;
+            let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
+            cv.dilate(maskImage, maskImage, kernel);
+            kernel.delete();
+
+            const resultRGBA = cv.image_complete_js(srcImage, maskImage, 30);
 
             let resultBuffer = resultRGBA.data.slice().buffer;
             const resultMetadata = {

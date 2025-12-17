@@ -2,115 +2,86 @@
 #include <emscripten/val.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
-#include <iostream>
 #include <vector>
 #include <cmath>
 #include <limits>
+#include <algorithm>
 
 using namespace emscripten;
 using namespace cv;
 using namespace std;
 
 // -------------------------------------------------------------------------
-// Helper: BITMAP class
+// Global & Utils
 // -------------------------------------------------------------------------
-class BITMAP {
-public:
-    int w, h;
-    int *data;
-    BITMAP(int w_, int h_) : w(w_), h(h_) {
-        // [FIX] Ensure valid dimensions
-        if (w <= 0 || h <= 0) { w = 0; h = 0; data = NULL; return; }
-        data = new int[w * h];
-        memset(data, 0, sizeof(int) * w * h);
-    }
-    ~BITMAP() { if(data) delete[] data; }
-    int *operator[](int y) { return &data[y * w]; }
-};
+const int patch_w = 8;
+const int rs_max = INT_MAX;
 
-// -------------------------------------------------------------------------
-// Global Parameters
-// -------------------------------------------------------------------------
-int patch_w = 8;
-int rs_max = INT_MAX; 
+// 快速隨機數 (比 rand() 快)
+static unsigned int g_seed = 12345;
+inline int fast_rand() {
+    g_seed = (214013 * g_seed + 2531011);
+    return (g_seed >> 16) & 0x7FFF;
+}
 
 #define XY_TO_INT(x, y) (((y)<<12)|(x))
 #define INT_TO_X(v) ((v)&((1<<12)-1))
 #define INT_TO_Y(v) ((v)>>12)
 
-#ifndef MAX
-#define MAX(a, b) ((a)>(b)?(a):(b))
-#define MIN(a, b) ((a)<(b)?(a):(b))
-#endif
-
-// -------------------------------------------------------------------------
-// Core Logic
-// -------------------------------------------------------------------------
-
-struct Box {
-    int xmin, xmax, ymin, ymax;
+// NNF 結構 (使用 vector 安全管理)
+struct NNF {
+    vector<int> data;
+    int w, h;
+    NNF(int w_, int h_) : w(w_), h(h_) { 
+        data.resize(w * h); 
+    }
+    // 支援快速重置大小，避免重新分配記憶體
+    void resize(int w_, int h_) {
+        w = w_; h = h_;
+        if (data.size() != w * h) data.resize(w * h);
+    }
+    inline int& at(int y, int x) { return data[y * w + x]; }
 };
 
-Box getBox(const Mat& mask) {
-    int xmin = INT_MAX, ymin = INT_MAX;
-    int xmax = 0, ymax = 0;
-    bool found = false;
+// -------------------------------------------------------------------------
+// Core: Distance (極致指針優化 + 嚴格紋理篩選)
+// -------------------------------------------------------------------------
+inline int dist(const Mat& a, const Mat& b, int ax, int ay, int bx, int by, const Mat& mask, int cutoff = INT_MAX) {
+    // 1. 嚴格來源篩選 (Source Constraint)
+    // 確保來源 Patch 的左上角和右下角都不在 Mask 內
+    // 這保證了我們複製過來的紋理是「乾淨」的，不會把雜訊複製過來
+    const uchar* m_ptr = mask.ptr<uchar>(by);
+    if (m_ptr[bx] == 255) return INT_MAX;
     
-    // Safety check for empty mask
-    if (mask.empty()) return {0, 0, 0, 0};
+    const uchar* m_ptr_btm = mask.ptr<uchar>(by + patch_w - 1);
+    if (m_ptr_btm[bx + patch_w - 1] == 255) return INT_MAX;
 
-    for (int h = 0; h < mask.rows; h++) {
-        const uchar* ptr = mask.ptr<uchar>(h);
-        for (int w = 0; w < mask.cols; w++) {
-            if (ptr[w] == 255) { 
-                if (h < ymin) ymin = h;
-                if (h > ymax) ymax = h;
-                if (w < xmin) xmin = w;
-                if (w > xmax) xmax = w;
-                found = true;
-            }
-        }
-    }
+    int ans = 0;
     
-    if (!found) return {0, 0, 0, 0};
-
-    xmin = MAX(0, xmin - patch_w);
-    ymin = MAX(0, ymin - patch_w);
-    xmax = MIN(mask.cols - 1, xmax + patch_w);
-    ymax = MIN(mask.rows - 1, ymax + patch_w);
-
-    return {xmin, xmax, ymin, ymax};
-}
-
-int dist(const Mat& a, const Mat& b, int ax, int ay, int bx, int by, const Mat& mask, int cutoff = INT_MAX) {
-    long long ans = 0;
-    
-    // Bounds check protection (Important for stability)
-    if (bx < 0 || by < 0 || bx > b.cols - patch_w || by > b.rows - patch_w) return INT_MAX;
-
-    if (mask.at<uchar>(by, bx) == 255 || 
-        mask.at<uchar>(by + patch_w - 1, bx + patch_w - 1) == 255) {
-        return INT_MAX;
-    }
-
+    // 2. 指針運算計算色差 (Lab)
     for (int dy = 0; dy < patch_w; dy++) {
-        const Vec3b* arow = a.ptr<Vec3b>(ay + dy);
-        const Vec3b* brow = b.ptr<Vec3b>(by + dy);
-        for (int dx = 0; dx < patch_w; dx++) {
-            const Vec3b& ac = arow[ax + dx];
-            const Vec3b& bc = brow[bx + dx];
+        const uchar* a_ptr = a.ptr<uchar>(ay + dy);
+        const uchar* b_ptr = b.ptr<uchar>(by + dy);
+        
+        int ax3 = ax * 3;
+        int bx3 = bx * 3;
 
-            int d0 = (int)ac[0] - (int)bc[0];
-            int d1 = (int)ac[1] - (int)bc[1];
-            int d2 = (int)ac[2] - (int)bc[2];
+        for (int dx = 0; dx < patch_w; dx++) {
+            int d0 = (int)a_ptr[ax3]     - (int)b_ptr[bx3];
+            int d1 = (int)a_ptr[ax3 + 1] - (int)b_ptr[bx3 + 1];
+            int d2 = (int)a_ptr[ax3 + 2] - (int)b_ptr[bx3 + 2];
+            
             ans += d0 * d0 + d1 * d1 + d2 * d2;
+            if (ans >= cutoff) return cutoff;
+            
+            ax3 += 3;
+            bx3 += 3;
         }
-        if (ans >= cutoff) return cutoff;
     }
-    return (int)ans;
+    return ans;
 }
 
-void improve_guess(const Mat& a, const Mat& b, int ax, int ay, int &xbest, int &ybest, int &dbest, int bx, int by, const Mat& mask) {
+inline void improve_guess(const Mat& a, const Mat& b, int ax, int ay, int &xbest, int &ybest, int &dbest, int bx, int by, const Mat& mask) {
     int d = dist(a, b, ax, ay, bx, by, mask, dbest);
     if (d < dbest) {
         dbest = d;
@@ -119,39 +90,50 @@ void improve_guess(const Mat& a, const Mat& b, int ax, int ay, int &xbest, int &
     }
 }
 
-void patchmatch(const Mat& a, const Mat& b, BITMAP *&ann, BITMAP *&annd, const Mat& mask, int pm_iters) {
-    // [FIX] Always delete and set to NULL to prevent double free logic issues
-    if (ann) { delete ann; ann = NULL; }
-    if (annd) { delete annd; annd = NULL; }
-    
-    // [FIX] Check for image too small for patch
-    if (a.cols < patch_w || a.rows < patch_w) return;
+// -------------------------------------------------------------------------
+// PatchMatch: 分離 初始化 與 迭代
+// -------------------------------------------------------------------------
 
-    ann = new BITMAP(a.cols, a.rows);
-    annd = new BITMAP(a.cols, a.rows);
-    
+// 初始化 NNF (只做一次)
+void patchmatch_init(const Mat& a, const Mat& b, NNF& ann, vector<int>& annd, const Mat& mask) {
     int aew = a.cols - patch_w + 1;
     int aeh = a.rows - patch_w + 1;
     int bew = b.cols - patch_w + 1;
     int beh = b.rows - patch_w + 1;
+    
+    if (bew <= 0 || beh <= 0) return;
 
     for (int ay = 0; ay < aeh; ay++) {
         for (int ax = 0; ax < aew; ax++) {
             int bx, by;
             bool valid = false;
             int attempts = 0;
-            while (!valid && attempts < 100) {
-                bx = rand() % bew;
-                by = rand() % beh;
-                if (mask.at<uchar>(by, bx) != 255) valid = true;
+            // 尋找合法來源
+            while (!valid && attempts < 20) {
+                bx = fast_rand() % bew;
+                by = fast_rand() % beh;
+                if (mask.ptr<uchar>(by)[bx] != 255 && 
+                    mask.ptr<uchar>(by + patch_w - 1)[bx + patch_w - 1] != 255) {
+                    valid = true;
+                }
                 attempts++;
             }
-            (*ann)[ay][ax] = XY_TO_INT(bx, by);
-            (*annd)[ay][ax] = dist(a, b, ax, ay, bx, by, mask);
+            ann.at(ay, ax) = XY_TO_INT(bx, by);
+            annd[ay * a.cols + ax] = dist(a, b, ax, ay, bx, by, mask);
         }
     }
+}
 
-    for (int iter = 0; iter < pm_iters; iter++) {
+// 迭代優化 (基於上一次的 NNF 繼續優化 -> 產生連續紋理)
+void patchmatch_iterate(const Mat& a, const Mat& b, NNF& ann, vector<int>& annd, const Mat& mask, int iter_count) {
+    int aew = a.cols - patch_w + 1;
+    int aeh = a.rows - patch_w + 1;
+    int bew = b.cols - patch_w + 1;
+    int beh = b.rows - patch_w + 1;
+    
+    if (bew <= 0 || beh <= 0) return;
+
+    for (int iter = 0; iter < iter_count; iter++) {
         int ystart = 0, yend = aeh, ychange = 1;
         int xstart = 0, xend = aew, xchange = 1;
         
@@ -162,170 +144,187 @@ void patchmatch(const Mat& a, const Mat& b, BITMAP *&ann, BITMAP *&annd, const M
 
         for (int ay = ystart; ay != yend; ay += ychange) {
             for (int ax = xstart; ax != xend; ax += xchange) {
-                int v = (*ann)[ay][ax];
-                int xbest = INT_TO_X(v), ybest = INT_TO_Y(v);
-                int dbest = (*annd)[ay][ax];
+                int& v_ref = ann.at(ay, ax);
+                int& d_ref = annd[ay * a.cols + ax];
+                
+                int xbest = INT_TO_X(v_ref);
+                int ybest = INT_TO_Y(v_ref);
+                int dbest = d_ref;
 
+                // Propagate
                 if ((unsigned)(ax - xchange) < (unsigned)aew) {
-                    int vp = (*ann)[ay][ax - xchange];
+                    int vp = ann.at(ay, ax - xchange);
                     int xp = INT_TO_X(vp) + xchange, yp = INT_TO_Y(vp);
-                    // [FIX] Cast strictly to int for comparison before unsigned cast
-                    if (xp >= 0 && yp >= 0 && xp < bew && yp < beh) {
+                    if (xp >= 0 && xp < bew && yp >= 0 && yp < beh) {
                         improve_guess(a, b, ax, ay, xbest, ybest, dbest, xp, yp, mask);
                     }
                 }
                 if ((unsigned)(ay - ychange) < (unsigned)aeh) {
-                    int vp = (*ann)[ay - ychange][ax];
+                    int vp = ann.at(ay - ychange, ax);
                     int xp = INT_TO_X(vp), yp = INT_TO_Y(vp) + ychange;
                     if (xp >= 0 && yp >= 0 && xp < bew && yp < beh) {
                         improve_guess(a, b, ax, ay, xbest, ybest, dbest, xp, yp, mask);
                     }
                 }
 
-                int rs_start = rs_max;
-                if (rs_start > MAX(b.cols, b.rows)) rs_start = MAX(b.cols, b.rows);
+                // Random Search
+                int rs_start = max(bew, beh);
                 for (int mag = rs_start; mag >= 1; mag /= 2) {
-                    int xmin = MAX(xbest - mag, 0), xmax = MIN(xbest + mag + 1, bew);
-                    int ymin = MAX(ybest - mag, 0), ymax = MIN(ybest + mag + 1, beh);
-                    // [FIX] Avoid modulo by zero if xmax == xmin
+                    int xmin = max(0, xbest - mag);
+                    int xmax = min(bew, xbest + mag + 1);
+                    int ymin = max(0, ybest - mag);
+                    int ymax = min(beh, ybest + mag + 1);
+                    
                     if (xmax > xmin && ymax > ymin) {
-                        int xp = xmin + rand() % (xmax - xmin);
-                        int yp = ymin + rand() % (ymax - ymin);
+                        int xp = xmin + fast_rand() % (xmax - xmin);
+                        int yp = ymin + fast_rand() % (ymax - ymin);
                         improve_guess(a, b, ax, ay, xbest, ybest, dbest, xp, yp, mask);
                     }
                 }
 
-                (*ann)[ay][ax] = XY_TO_INT(xbest, ybest);
-                (*annd)[ay][ax] = dbest;
+                v_ref = XY_TO_INT(xbest, ybest);
+                d_ref = dbest;
             }
         }
     }
+}
+
+struct Box { int xmin, xmax, ymin, ymax; };
+
+Box getBox(const Mat& mask) {
+    if (mask.empty()) return {0,0,0,0};
+    int xmin = mask.cols, ymin = mask.rows, xmax = 0, ymax = 0;
+    bool found = false;
+    for (int y = 0; y < mask.rows; y++) {
+        const uchar* ptr = mask.ptr<uchar>(y);
+        for (int x = 0; x < mask.cols; x++) {
+            if (ptr[x] == 255) {
+                if (x < xmin) xmin = x;
+                if (x > xmax) xmax = x;
+                if (y < ymin) ymin = y;
+                if (y > ymax) ymax = y;
+                found = true;
+            }
+        }
+    }
+    if (!found) return {0, 0, 0, 0};
+    return {
+        max(0, xmin - patch_w), 
+        min(mask.cols, xmax + patch_w + 1), 
+        max(0, ymin - patch_w), 
+        min(mask.rows, ymax + patch_w + 1)
+    };
 }
 
 // -------------------------------------------------------------------------
 // Main Function
 // -------------------------------------------------------------------------
 
-Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations, emscripten::val on_progress) {
-    
+Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations) {
     Mat im_orig, mask;
     
-    // [FIX] 1. Force 3-channel BGR -> Lab. Handle Gray (1ch) or BGRA (4ch).
-    // The dist() function uses ptr<Vec3b>, so we MUST ensure the Mat is CV_8UC3.
+    // 轉換格式 (Lab 空間)
     if (im_orig_in.channels() == 4) {
-        Mat temp;
-        cvtColor(im_orig_in, temp, COLOR_RGBA2BGR);
+        Mat temp; cvtColor(im_orig_in, temp, COLOR_RGBA2BGR);
         cvtColor(temp, im_orig, COLOR_BGR2Lab);
-    } else if (im_orig_in.channels() == 3) {
-        cvtColor(im_orig_in, im_orig, COLOR_BGR2Lab);
-    } else if (im_orig_in.channels() == 1) {
-        Mat temp;
-        cvtColor(im_orig_in, temp, COLOR_GRAY2BGR); // Convert Gray to BGR first
-        cvtColor(temp, im_orig, COLOR_BGR2Lab);
-    } else {
-        // Fallback, but might crash if not 3 channels.
-        im_orig_in.copyTo(im_orig);
+    } else { 
+        cvtColor(im_orig_in, im_orig, COLOR_BGR2Lab); 
     }
-
+    
     if (mask_in.channels() > 1) {
         cvtColor(mask_in, mask, COLOR_RGBA2GRAY);
     } else {
         mask = mask_in.clone();
     }
-    threshold(mask, mask, 127, 255, THRESH_BINARY); 
+    threshold(mask, mask, 127, 255, THRESH_BINARY);
 
-    int rows = im_orig.rows;
-    int cols = im_orig.cols;
-    
-    // [FIX] If image is too small for patch size, return immediately
-    if (rows < patch_w || cols < patch_w) {
-        Mat resultRGBA;
-        cvtColor(im_orig_in, resultRGBA, COLOR_BGR2RGBA); // Return original
-        return resultRGBA;
+    if (im_orig.rows < patch_w || im_orig.cols < patch_w) {
+        Mat res; cvtColor(im_orig_in, res, COLOR_BGR2RGBA); return res;
     }
 
-    int startscale = (int)-1 * ceil(log2(MIN(rows, cols))) + 3; 
-    if(startscale > 0) startscale = 0; 
-
-    double total_work = 0;
-    for (int s = startscale; s <= 0; s++) total_work += pow(4, s) * user_iterations;
-    double current_work = 0;
+    // 金字塔計算
+    int min_dim = min(im_orig.rows, im_orig.cols);
+    int startscale = 0;
+    while ( (min_dim * pow(2, startscale - 1)) >= (patch_w + 2) ) { startscale--; }
+    startscale = max(startscale, -6);
 
     Mat resize_img = im_orig.clone();
     Mat resize_mask = mask.clone();
     
     double scale = pow(2, startscale);
     resize(im_orig, resize_img, Size(), scale, scale, INTER_AREA);
-    resize(mask, resize_mask, Size(), scale, scale, INTER_NEAREST); 
+    resize(mask, resize_mask, Size(), scale, scale, INTER_NEAREST);
 
-    // Safety: ensure resize didn't make it too small
-    if (resize_img.rows < patch_w || resize_img.cols < patch_w) {
-        resize(im_orig, resize_img, Size(), 1.0, 1.0); // Reset to orig if too small
-        resize(mask, resize_mask, Size(), 1.0, 1.0);
-    }
-
+    // 隨機噪點填充
     for (int y = 0; y < resize_img.rows; ++y) {
+        uchar* m_ptr = resize_mask.ptr<uchar>(y);
+        Vec3b* i_ptr = resize_img.ptr<Vec3b>(y);
         for (int x = 0; x < resize_img.cols; ++x) {
-            if (resize_mask.at<uchar>(y, x) == 255) {
-                resize_img.at<Vec3b>(y, x) = Vec3b(rand()%256, rand()%256, rand()%256);
+            if (m_ptr[x] == 255) {
+                i_ptr[x] = Vec3b(fast_rand()%256, fast_rand()%256, fast_rand()%256);
             }
         }
     }
 
+    // 準備記憶體 (Reuse Memory)
+    // 宣告在迴圈外，讓它們能跨迭代保持狀態
+    NNF ann(0, 0); 
+    vector<int> annd;
+
     for (int logscale = startscale; logscale <= 0; logscale++) {
         
-        Mat element = Mat::zeros(2 * patch_w - 1, 2 * patch_w - 1, CV_8UC1);
-        element(Rect(patch_w - 1, patch_w - 1, patch_w, patch_w)) = 255;
+        // 確保 ann 大小正確
+        ann.resize(resize_img.cols, resize_img.rows);
+        if (annd.size() != resize_img.cols * resize_img.rows) {
+            annd.resize(resize_img.cols * resize_img.rows);
+        }
+
+        Mat element = Mat::zeros(2*patch_w-1, 2*patch_w-1, CV_8UC1);
+        element(Rect(patch_w-1, patch_w-1, patch_w, patch_w)) = 255;
         Mat dilated_mask;
         dilate(resize_mask, dilated_mask, element);
-
+        
         Box mask_box = getBox(resize_mask);
         
+        // 【關鍵】每一層開始時，做一次全新的初始化
+        // 這樣可以讓新的 Scale 有一個好的隨機起點
+        patchmatch_init(resize_img, resize_img, ann, annd, dilated_mask);
+
+        // 主迴圈
         for (int im_iter = 0; im_iter < user_iterations; ++im_iter) {
             
-            if (on_progress.typeOf().as<std::string>() == "function") {
-                double iter_weight = pow(4, logscale); 
-                current_work += iter_weight;
-                double progress = MIN(1.0, current_work / total_work);
-                on_progress(val(progress));
-            }
+            // 【關鍵】這裡只做 Iterate (Refine)，不做 Init
+            // 這樣 ann 會記住上一圈的結果，紋理會越來越清晰
+            patchmatch_iterate(resize_img, resize_img, ann, annd, dilated_mask, 2); 
+            // 註：iter_count 可以設小一點 (如 2)，因為我們外部迴圈跑很多次
 
-            // [FIX] Initialize to NULL
-            BITMAP *ann = NULL, *annd = NULL;
-            
-            patchmatch(resize_img, resize_img, ann, annd, dilated_mask, 5); 
+            // Direct Copy (指針優化版)
+            for (int y = mask_box.ymin; y < mask_box.ymax; ++y) {
+                if (y >= resize_img.rows - patch_w) continue;
+                
+                uchar* m_ptr = resize_mask.ptr<uchar>(y);
+                Vec3b* img_row = resize_img.ptr<Vec3b>(y);
 
-            // [FIX] Safety check: ann might be null if patchmatch failed/skipped
-            if (ann != NULL) {
-                for (int y = mask_box.ymin; y < mask_box.ymax; ++y) {
-                    if (y >= resize_img.rows - patch_w) continue;
+                for (int x = mask_box.xmin; x < mask_box.xmax; ++x) {
+                    if (x >= resize_img.cols - patch_w) continue;
                     
-                    for (int x = mask_box.xmin; x < mask_box.xmax; ++x) {
-                        if (x >= resize_img.cols - patch_w) continue;
-
-                        if (resize_mask.at<uchar>(y, x) == 255) {
-                            int v = (*ann)[y][x];
-                            int bx = INT_TO_X(v);
-                            int by = INT_TO_Y(v);
-                            
-                            // [FIX] Final bounds check before write
-                            if (bx < resize_img.cols && by < resize_img.rows) {
-                                resize_img.at<Vec3b>(y, x) = resize_img.at<Vec3b>(by, bx);
-                            }
+                    if (m_ptr[x] == 255) {
+                        int v = ann.at(y, x);
+                        int bx = INT_TO_X(v);
+                        int by = INT_TO_Y(v);
+                        
+                        if (bx < resize_img.cols && by < resize_img.rows) {
+                            img_row[x] = resize_img.at<Vec3b>(by, bx);
                         }
                     }
                 }
             }
-
-            // [FIX] 2. Set pointers to NULL after delete to avoid double-free in next iteration logic (if any)
-            if (ann) { delete ann; ann = NULL; }
-            if (annd) { delete annd; annd = NULL; }
         }
 
+        // Upscale
         if (logscale < 0) {
             Mat upscale_img;
-            resize(resize_img, upscale_img, Size(), 2.0, 2.0, INTER_CUBIC); 
-            
+            resize(resize_img, upscale_img, Size(), 2.0, 2.0, INTER_CUBIC);
             resize(mask, resize_mask, upscale_img.size(), 0, 0, INTER_NEAREST);
             
             Mat inverted_mask;
@@ -333,16 +332,16 @@ Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations, emscript
             
             Mat current_orig_scaled;
             resize(im_orig, current_orig_scaled, upscale_img.size(), 0, 0, INTER_AREA);
-            current_orig_scaled.copyTo(upscale_img, inverted_mask); 
+            current_orig_scaled.copyTo(upscale_img, inverted_mask);
             
             resize_img = upscale_img;
+            // 注意：下一圈 NNF 會 resize 並 init，所以這裡不用擔心 NNF 尺寸
         }
     }
 
     Mat resultBGR, resultRGBA;
     cvtColor(resize_img, resultBGR, COLOR_Lab2BGR);
     cvtColor(resultBGR, resultRGBA, COLOR_BGR2RGBA);
-
     return resultRGBA;
 }
 

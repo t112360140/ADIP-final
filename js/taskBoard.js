@@ -16,9 +16,7 @@ function newTask(name='APPLE', detail="", process=0){
         div.append(element_detail);
         const progress_bar=document.createElement('progress');
         progress_bar.style.cssText='width:100%';
-        progress_bar.max=100;
-        progress_bar.min=0;
-        progress_bar.value=process*100;
+        if(process!=null) progress_bar.value=process;
         div.append(progress_bar);
 
         let data={
@@ -38,7 +36,7 @@ function newTask(name='APPLE', detail="", process=0){
                 if(process!=null) this.process=process;
                 this.element.name.innerHTML=this.name;
                 this.element.detail.innerHTML=this.detail;
-                this.element.bar.value=this.process*100;
+                this.element.bar.value=this.process;
             },
             remove:function(){
                 if(this.element)
@@ -55,6 +53,8 @@ function newTask(name='APPLE', detail="", process=0){
         }
         task_board.append(div);
         task_list.push(data);
+
+        task_board.style.display='block';
         return data;
     }
     return;
