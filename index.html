@@ -80,7 +80,16 @@
                                     removeMergeLayer(image_editing_data.select);
                                 }
                             }
-                        ">刪除層</button><br>
+                        ">刪除層</button>
+                    <br>
+                    <button onclick="mirrorMergeImage(image_editing_data.select, 0);">水平鏡像</button>
+                    <button onclick="mirrorMergeImage(image_editing_data.select, 1);">垂直鏡像</button>
+                    旋轉:<input type="range" min="-180" max="180" value="0" oninput="
+                            rotateMergeImage(image_editing_data.select, parseInt(this.value));
+                        ">
+                    <br>
+                    <button onclick="changeMergeImageColor(image_editing_data.select);">調整色調</button>
+                    <br>
                     <button onclick="saveMergeImage();">儲存影像</button>
                 </div>
                 <div id="PhotoFix-menu" style="display:none;">

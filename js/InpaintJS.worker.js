@@ -22,7 +22,7 @@ self.onmessage = function(event) {
 
             // const resultRGBA = inpaintFunction(cv, srcImage, maskImage, uuid);
 
-            const kernelSize = 3;
+            const kernelSize = 5;
             let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
             cv.dilate(maskImage, maskImage, kernel);
             kernel.delete();

@@ -15,7 +15,6 @@ using namespace std;
 // Global & Utils
 // -------------------------------------------------------------------------
 const int patch_w = 8;
-const int rs_max = INT_MAX;
 
 // 快速隨機數 (比 rand() 快)
 static unsigned int g_seed = 12345;
@@ -299,22 +298,43 @@ Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations) {
             // 註：iter_count 可以設小一點 (如 2)，因為我們外部迴圈跑很多次
 
             // Direct Copy (指針優化版)
+            int max_ann_y = resize_img.rows - patch_w;
+            int max_ann_x = resize_img.cols - patch_w;
+
             for (int y = mask_box.ymin; y < mask_box.ymax; ++y) {
-                if (y >= resize_img.rows - patch_w) continue;
+                // 基本邊界檢查，防止超出圖像本身
+                if (y >= resize_img.rows) continue;
                 
                 uchar* m_ptr = resize_mask.ptr<uchar>(y);
                 Vec3b* img_row = resize_img.ptr<Vec3b>(y);
 
                 for (int x = mask_box.xmin; x < mask_box.xmax; ++x) {
-                    if (x >= resize_img.cols - patch_w) continue;
+                    if (x >= resize_img.cols) continue;
                     
                     if (m_ptr[x] == 255) {
-                        int v = ann.at(y, x);
-                        int bx = INT_TO_X(v);
-                        int by = INT_TO_Y(v);
+                        // 關鍵修改：
+                        // 如果 (x, y) 超出了 NNF 計算範圍 (在邊緣)，
+                        // 我們就 "Clamp" (夾具) 到最近的一個有效 Patch 位置 (ay, ax)
+                        int ay = (y < max_ann_y) ? y : max_ann_y;
+                        int ax = (x < max_ann_x) ? x : max_ann_x;
+
+                        // 取出該 Patch 指向的來源
+                        int v = ann.at(ay, ax);
+                        int bx_base = INT_TO_X(v);
+                        int by_base = INT_TO_Y(v);
                         
-                        if (bx < resize_img.cols && by < resize_img.rows) {
-                            img_row[x] = resize_img.at<Vec3b>(by, bx);
+                        // 計算偏差值 (Offset)
+                        // 如果我們是在邊緣借用上面的 Patch，需要加上位移量
+                        int dy = y - ay;
+                        int dx = x - ax;
+
+                        // 計算實際來源像素位置
+                        int source_x = bx_base + dx;
+                        int source_y = by_base + dy;
+
+                        // 確保來源像素也在圖片範圍內 (通常 NNF 產生時已保證，但加上 offset 後需再檢查)
+                        if (source_x < resize_img.cols && source_y < resize_img.rows) {
+                            img_row[x] = resize_img.at<Vec3b>(source_y, source_x);
                         }
                     }
                 }
@@ -344,6 +364,7 @@ Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations) {
     cvtColor(resultBGR, resultRGBA, COLOR_BGR2RGBA);
     return resultRGBA;
 }
+
 
 EMSCRIPTEN_BINDINGS(my_module) {
     emscripten::function("image_complete_js", &image_complete_js);

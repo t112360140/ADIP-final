@@ -41,13 +41,15 @@ function newTask(name='APPLE', detail="", process=0){
             remove:function(){
                 if(this.element)
                     task_board.removeChild(this.element.div)
-                for(let i=0;i<task_list.legth;i++){
+                for(let i=0;i<task_list.length;i++){
                     if(task_list[i].uuid==this.uuid){
-                        task_list[i]=ull;
-                        task_list=task_list[i].filter((v)=>(v!=null));
+                        task_list[i]=null;
+                        task_list=task_list.filter((v)=>(v!=null));
                         break;
                     }
                 }
+                if(task_board&&task_list.length<=0)
+                    task_board.style.display='none';
                 this.element=null;
             },
         }

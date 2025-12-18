@@ -82,7 +82,7 @@ function downloadMat(data){
     canvas.toBlob((blob)=>{
         const a=document.createElement('a');
         a.href=URL.createObjectURL(blob);
-        a.download=data.name;
+        a.download=(data.name.includes('.png')?data.name:(data.name+'.png'));
         a.click();
         setTimeout(()=>{URL.revokeObjectURL(a.href)}, 5000);
     }, 'image/png');
@@ -146,7 +146,7 @@ async function addImageToList(name, blob){
 }
 
 function removeImageFromList(index){
-    if(index<0&&imageList<=index) return;
+    if(index<0&&imageList.length<=index) return;
     const sibling=findUUID(imageList[index].sibling).sibling;
     if(sibling.length>0){
         for(let i=0;i<sibling.length;i++){
@@ -166,10 +166,12 @@ function findUUID(uuid){
     let index=-1;
     let child=[];
     let sibling=[];
-    for(let i=0;i<imageList.length;i++){
-        if(imageList[i].uuid==uuid) index=i;
-        if(imageList[i].parent==uuid) child.push({index: i, data: imageList[i]});
-        if(imageList[i].sibling==uuid) sibling.push({index: i, data: imageList[i]});
+    if(uuid){
+        for(let i=0;i<imageList.length;i++){
+            if(imageList[i].uuid==uuid) index=i;
+            if(imageList[i].parent==uuid) child.push({index: i, data: imageList[i]});
+            if(imageList[i].sibling==uuid) sibling.push({index: i, data: imageList[i]});
+        }
     }
     return {
         index: index,
