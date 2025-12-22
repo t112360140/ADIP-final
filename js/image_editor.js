@@ -1748,3 +1748,107 @@ function saveMergeImageSeamless() {
     });
     fileUpdate();
 }
+
+
+/**
+ * 拉普拉斯金字塔融合 (Laplacian Pyramid Blending)
+ * @param {cv.Mat} fgMat 前景人像 (8UC3 或 8UC4)
+ * @param {cv.Mat} bgMat 背景影像 (同尺寸)
+ * @param {cv.Mat} maskMat 遮罩 (8UC1, 黑白)
+ * @param {number} levels 金字塔層數 (建議 4-6)
+ * @returns {cv.Mat} 融合後的影像 (8UC3)
+ */
+function laplacianPyramidBlending(fgMat, bgMat, maskMat, levels) {
+    // --- 1. 預處理：轉換為浮點數 (CV_32F) 以確保計算精度 ---
+    let fg = new cv.Mat();
+    let bg = new cv.Mat();
+    let mask = new cv.Mat();
+    
+    fgMat.convertTo(fg, cv.CV_32FC3, 1/255.0);
+    bgMat.convertTo(bg, cv.CV_32FC3, 1/255.0);
+    maskMat.convertTo(mask, cv.CV_32FC3, 1/255.0); // 遮罩也轉成 float 以便做乘法
+
+    // --- 2. 建立高斯金字塔 (Gaussian Pyramids) ---
+    function buildGauss(src, lvls) {
+        let py = [src.clone()];
+        for (let i = 0; i < lvls; i++) {
+            let next = new cv.Mat();
+            cv.pyrDown(py[i], next);
+            py.push(next);
+        }
+        return py;
+    }
+
+    let gaussFG = buildGauss(fg, levels);
+    let gaussBG = buildGauss(bg, levels);
+    let gaussMask = buildGauss(mask, levels);
+
+    // --- 3. 建立拉普拉斯金字塔 (Laplacian Pyramids) ---
+    function buildLap(gaussPy, lvls) {
+        let py = [];
+        for (let i = 0; i < lvls; i++) {
+            let expanded = new cv.Mat();
+            // pyrUp 時傳入 dstSize 以應對長寬為奇數的情況
+            cv.pyrUp(gaussPy[i + 1], expanded, gaussPy[i].size());
+            let lap = new cv.Mat();
+            cv.subtract(gaussPy[i], expanded, lap);
+            py.push(lap);
+            expanded.delete();
+        }
+        py.push(gaussPy[lvls].clone()); // 最小的一層直接存入
+        return py;
+    }
+
+    let lapFG = buildLap(gaussFG, levels);
+    let lapBG = buildLap(gaussBG, levels);
+
+    // --- 4. 融合金字塔每一層 (Blending) ---
+    let blendedPyramid = [];
+    for (let i = 0; i <= levels; i++) {
+        let m = gaussMask[i];
+        let lFG = lapFG[i];
+        let lBG = lapBG[i];
+
+        // 計算: L_result = L_fg * Mask + L_bg * (1 - Mask)
+        let resFG = new cv.Mat();
+        let resBG = new cv.Mat();
+        let invMask = new cv.Mat(m.size(), m.type(), new cv.Scalar(1.0, 1.0, 1.0, 1.0));
+        cv.subtract(invMask, m, invMask);
+
+        cv.multiply(lFG, m, resFG);
+        cv.multiply(lBG, invMask, resBG);
+
+        let combined = new cv.Mat();
+        cv.add(resFG, resBG, combined);
+        blendedPyramid.push(combined);
+
+        // 釋放中間 Mat
+        resFG.delete(); resBG.delete(); invMask.delete();
+    }
+
+    // --- 5. 重建影像 (Reconstruction) ---
+    let result = blendedPyramid[levels].clone();
+    for (let i = levels - 1; i >= 0; i--) {
+        let up = new cv.Mat();
+        cv.pyrUp(result, up, blendedPyramid[i].size());
+        result.delete(); // 釋放舊的 result
+        result = new cv.Mat();
+        cv.add(up, blendedPyramid[i], result);
+        up.delete();
+    }
+
+    // --- 6. 收尾：轉回 8U 格式 ---
+    let finalOutput = new cv.Mat();
+    result.convertTo(finalOutput, cv.CV_8UC3, 255.0);
+
+    // --- 7. 大掃除：釋放所有金字塔佔用的記憶體 (非常重要！) ---
+    [fg, bg, mask, result].forEach(m => m.delete());
+    gaussFG.forEach(m => m.delete());
+    gaussBG.forEach(m => m.delete());
+    gaussMask.forEach(m => m.delete());
+    lapFG.forEach(m => m.delete());
+    lapBG.forEach(m => m.delete());
+    blendedPyramid.forEach(m => m.delete());
+
+    return finalOutput;
+}
