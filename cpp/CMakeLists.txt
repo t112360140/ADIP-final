@@ -98,7 +98,12 @@ link_libraries(${deps})
 
 set(bindings_cpp "${OPENCV_JS_BINDINGS_DIR}/gen/bindings.cpp")
 
+
+#==========ADD==========
 list(APPEND bindings_cpp "${CMAKE_CURRENT_SOURCE_DIR}/src/InpaintJS.cpp")
+list(APPEND bindings_cpp "${CMAKE_CURRENT_SOURCE_DIR}/src/SeamlessClone.cpp")
+#=======================
+
 
 set_source_files_properties(${bindings_cpp} PROPERTIES GENERATED TRUE)
 

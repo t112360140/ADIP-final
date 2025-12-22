@@ -56,6 +56,7 @@ const exampleList=[
     '11_1.png', '11_2.png',
     '12_1.png', '12_2.jpg',
     '0_1.png', '0_2.png',
+    '4_1_small.jpg',
 ];
 async function loadExample(){
     if(window.cvReady){

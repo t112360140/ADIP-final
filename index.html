@@ -45,6 +45,8 @@
                             image_editing_data.grabCutAdd=2;
                             opencv_info.innerHTML='標記想要移除的部分';
                         ">去除區域</button>
+                    <br>
+                    筆刷大小: <input type="number" onchange="updatePenWidth(parseInt(this.value));" min="1" max="50" value="5" class="pen-width">
                     <button onclick="saveGrabCut();">儲存影像</button>
                 </div>
                 <div id="Merge-menu" style="display:none;">
@@ -88,12 +90,27 @@
                             rotateMergeImage(image_editing_data.select, parseInt(this.value));
                         ">
                     <br>
-                    <button onclick="changeMergeImageColor(image_editing_data.select);">調整色調</button>
+                    <button onclick="applyGrayWorldWhiteBalance(image_editing_data.select);">白平衡(灰色世界)</button>
+                    <button onclick="applyGrayEdgeWhiteBalance(image_editing_data.select);">白平衡(灰色邊緣)</button>
+                    <button onclick="applyRobustWhitePatchWhiteBalance(image_editing_data.select);">白平衡(白斑)</button>
+                    <button onclick="
+                        if(0<=image_editing_data.select&&image_editing_data.select<image_editing_data.layer.length){
+                            let ret=parseInt(prompt(`請選擇轉移來源:\n${image_editing_data.layer.filter((v, i)=>(i!=image_editing_data.select)).map((v, i)=>((i+1).toString()+': '+v.name)).join('\n')}`))-1;
+                            if(0<=ret&&ret<image_editing_data.layer.length-1){
+                                ret=ret<image_editing_data.select?ret:ret+1;
+                                colorMatch(ret, image_editing_data.select);
+                            }
+                        }
+                    ">轉移顏色</button>
+                    <br>
+                    <button onclick="resetMergeImage(image_editing_data.select);">重置圖片</button>
                     <br>
                     <button onclick="saveMergeImage();">儲存影像</button>
                 </div>
                 <div id="PhotoFix-menu" style="display:none;">
+                    筆刷大小: <input type="number" onchange="updatePenWidth(parseInt(this.value));" min="1" max="50" value="5" class="pen-width">
                     <button onclick="fixImage();">修補影像</button>
+                    <button onclick="fixImagePatchMatch();">修補影像(PM)</button>
                     <button onclick="saveFixImage();">儲存影像</button>
                 </div>
             </div>

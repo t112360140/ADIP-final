@@ -1,4 +1,4 @@
-var set2Width=512;
+var set2Width=256;
 var GrabCutIterCount=2;
 
 
@@ -23,6 +23,15 @@ var image_editing_data={};
 const image_editor_canvas_div = document.getElementById('image-editor-canvas-div');
 const image_editor_canvas = document.getElementById('image-editor-canvas');
 const image_editor_mask_canvas = document.getElementById('image-editor-mask-canvas');
+
+var penWidth=5;
+function updatePenWidth(width=5){
+    penWidth=width;
+    let classList=document.getElementsByClassName('pen-width');
+    for(let i=0;i<classList.length;i++){
+        classList[i].value=penWidth;
+    }
+}
 
 let mouseData={};
 image_editor_canvas_div.addEventListener('mousedown', (event)=>{
@@ -125,18 +134,18 @@ image_editor_canvas_div.addEventListener('mousemove', (event)=>{
                         const ctx=image_editor_mask_canvas.getContext('2d');
                         ctx.fillStyle='#ff0000';
                         ctx.beginPath();
-                        ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2, true);
+                        ctx.arc(pos.x, pos.y, penWidth, 0, Math.PI * 2, true);
                         ctx.fill();
-                        addGrabCut(pos, 3);
+                        addGrabCut(pos, penWidth);
                     }
                     break;
                 case MODE.PhotoFix:
                     const ctx=image_editor_mask_canvas.getContext('2d');
                     ctx.fillStyle='#ff0000';
                     ctx.beginPath();
-                    ctx.arc(pos.x, pos.y, image_editing_data.penW, 0, Math.PI * 2, true);
+                    ctx.arc(pos.x, pos.y, penWidth, 0, Math.PI * 2, true);
                     ctx.fill();
-                    cv.circle(image_editing_data.mask, new cv.Point(pos.x, pos.y), image_editing_data.penW, new cv.Scalar(255), -1);
+                    cv.circle(image_editing_data.mask, new cv.Point(pos.x, pos.y), penWidth, new cv.Scalar(255), -1);
                     break;
             }
         }
@@ -161,8 +170,8 @@ image_editor_canvas_div.addEventListener('wheel', (event)=>{
         if(0<=image_editing_data.select&&image_editing_data.select<image_editing_data.layer.length&&
             !image_editing_data.adjust[image_editing_data.select].base
         ){
-            if(event.deltaY>0) resizeMergeImage(image_editing_data.select, 0.9);
-            else resizeMergeImage(image_editing_data.select, 1.1);
+            if(event.deltaY>0) resizeMergeImage(image_editing_data.select, 0.9, (event.ctrlKey*1+event.shiftKey*2)||3);
+            else resizeMergeImage(image_editing_data.select, 1.1, (event.ctrlKey*1+event.shiftKey*2)||3);
             event.preventDefault();
         }
     }
@@ -373,7 +382,7 @@ function setEditImage(image, mode, config={}){
                 if(image_editing_data.adjust[i].base) base=image_editing_data.adjust[i];
                 break;
             }
-            const scale_=base?Math.min(base.w/image.width, base.h/image.height, 1):1;
+            const scale_=Math.min(base?Math.min(base.w/image.width, base.h/image.height, 1):1, 1);
             image_editing_data.layer.push(data);
             image_editing_data.adjust.push({
                 x: 0, y: 0,
@@ -641,11 +650,11 @@ function saveGrabCut(){
             let imgIdx = i * channels;
             if (maskData[i] === cv.GC_FGD || maskData[i] === cv.GC_PR_FGD) {
                 outBackData[imgIdx + 3] = 0;
-                for(let j=0;j<channels;j++) outMaskData[imgIdx+j]=255;
+                for(let j=0;j<3;j++) outMaskData[imgIdx+j]=255;
                 maskData[i]=255;
             }else{
                 outData[imgIdx + 3] = 0;
-                for(let j=0;j<channels;j++) outMaskData[imgIdx+j]=0;
+                for(let j=0;j<3;j++) outMaskData[imgIdx+j]=0;
                 maskData[i]=0;
             }
             if(channels==4) outMaskData[imgIdx+3]=255;
@@ -654,7 +663,8 @@ function saveGrabCut(){
         if((image_editing_data.img.type==TYPE.ORIGIN||image_editing_data.img.type==TYPE.FIXED) && confirm('是否要修補背景?')){
             if(confirm('使用PatchMatch修補?\n選擇"否"將使用OpenCV進行修補。')){
                 let task=newTask("圖像修復", `任務UUID: ${uuid_}`, null);
-                buildInpaintTask(cv, image_editing_data.img.image, resizeMask, (data)=>{
+                let back_data=imageClone(image_editing_data);
+                buildInpaintTask(cv, back_data.img.image, resizeMask, (data)=>{
                     // console.log(`Processing Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`);
                     // task.update(null, `任務UUID: ${uuid_}<br>Level: ${data.level}, Size: ${data.size[0]}x${data.size[1]}`, data.process);
                     task.update(null, `任務UUID: ${uuid_}<br>進度: ${Math.round(data.process*100)}%`, data.process);
@@ -664,9 +674,9 @@ function saveGrabCut(){
                         image: data,
                         uuid: uuid(),
                         type: TYPE.BACKGROUND,
-                        height: image_editing_data.img.height,
-                        width: image_editing_data.img.width,
-                        parent: image_editing_data.img.uuid,
+                        height: back_data.img.height,
+                        width: back_data.img.width,
+                        parent: back_data.img.uuid,
                         sibling: uuid_,
                     });
                     fileUpdate();
@@ -676,6 +686,8 @@ function saveGrabCut(){
                     console.error(err);
                     task.remove();
                     task=null;
+                }).finally(()=>{
+                    deepImageRemove(back_data);
                 });
                 
                 // imageList.push({
@@ -765,11 +777,7 @@ function saveGrabCut(){
 
 function fixImage(){
     if(image_editing_data.mode%10==3){
-        let transparent=new cv.Mat(image_editing_data.img.image.rows, image_editing_data.img.image.cols, cv.CV_8UC1, new cv.Scalar(0));
-        let channels = image_editing_data.img.image.channels();
-        for(let i=0;i<transparent.data.length.length;i++){
-            transparent.data[i]=outBackData[i*channels+3];
-        }
+        let {rgb, alpha} = RGBA2RGB(image_editing_data.img.image);
 
         // 修補背景
         const kernelSize = 3;
@@ -778,18 +786,13 @@ function fixImage(){
         let tempMask = image_editing_data.mask.mat_clone();
         cv.dilate(image_editing_data.mask, tempMask, kernel);
         let dst = new cv.Mat();
-        cv.cvtColor(image_editing_data.img.image, image_editing_data.img.image, cv.COLOR_RGBA2RGB, 0);
-        cv.inpaint(image_editing_data.img.image, tempMask, dst, inpaintRadius, cv.INPAINT_NS);    // cv.INPAINT_TELEA
-        image_editing_data.img.image.delete();
-        image_editing_data.img.image = dst;
-        cv.cvtColor(image_editing_data.img.image, image_editing_data.img.image, cv.COLOR_RGB2RGBA, 0);
+        cv.inpaint(rgb, tempMask, dst, inpaintRadius, cv.INPAINT_NS);    // cv.INPAINT_TELEA
+        rgb.delete();
+        rgb = dst;
 
-        outBackData = image_editing_data.img.image.data;
-        for(let i=0;i<transparent.data.length.length;i++){
-            outBackData[i*channels+3]=transparent.data[i];
-        }
+        image_editing_data.img.image = RGB2RGBA(rgb, alpha);
+
         tempMask.delete();
-        transparent.delete();
 
         image_editing_data.mask.delete();
         image_editing_data.mask = new cv.Mat(
@@ -801,6 +804,39 @@ function fixImage(){
         cv.imshow(image_editor_canvas, image_editing_data.img.image);
         const ctx=image_editor_mask_canvas.getContext('2d');
         ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
+    }
+}
+
+function fixImagePatchMatch(){
+    if(image_editing_data.mode%10==3){
+
+        let back_data=imageClone(image_editing_data);
+        let task=newTask("圖像修復", `任務UUID: ${back_data.img.uuid}`, null);
+        buildInpaintTask(cv, back_data.img.image, image_editing_data.mask).then((data)=>{
+            image_editing_data.img.image.delete();
+            image_editing_data.img.image=data;
+
+            image_editing_data.mask.delete();
+            image_editing_data.mask = new cv.Mat(
+                    image_editing_data.img.image.rows,
+                    image_editing_data.img.image.cols,
+                    cv.CV_8UC1,
+                    new cv.Scalar(0)
+                );
+            cv.imshow(image_editor_canvas, image_editing_data.img.image);
+            const ctx=image_editor_mask_canvas.getContext('2d');
+            ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
+
+            task.remove();
+            task=null;
+        }).catch((err)=>{
+            alert(`修復失敗: ${err}`)
+            console.error(err);
+            task.remove();
+            task=null;
+        }).finally(()=>{
+            deepImageRemove(back_data);
+        });
     }
 }
 
@@ -833,15 +869,15 @@ merge_layer_select.addEventListener('change', ()=>{
     }
 });
 function updateMergeLayerSelect(select){
-    if(image_editing_data.layer){
-        let selectOut='';
-        const selected=select??merge_layer_select.value;
-        for(let i=0;i<image_editing_data.layer.length;i++){
-            selectOut=`<option value="${image_editing_data.layer[i].uuid}"${(image_editing_data.layer[i].uuid===selected)?' selected':''}>${image_editing_data.layer.length-i}: ${image_editing_data.layer[i].name}${image_editing_data.adjust[i].base?'*':''}</option>`+selectOut;
-            if(image_editing_data.layer[i].uuid===selected) image_editing_data.select=i;
-        }
-        merge_layer_select.innerHTML=selectOut;
+    if(!image_editing_data.layer) return;
+    let selectOut='';
+    let selected=select??merge_layer_select.value;
+    for(let i=0;i<image_editing_data.layer.length;i++){
+        selectOut=`<option value="${image_editing_data.layer[i].uuid}"${(image_editing_data.layer[i].uuid===selected)?' selected':''}>${image_editing_data.layer.length-i}: ${image_editing_data.layer[i].name}${image_editing_data.adjust[i].base?'*':''}</option>`+selectOut;
+        if(image_editing_data.layer[i].uuid===selected) image_editing_data.select=i;
     }
+    if(image_editing_data.layer.length<=1) image_editing_data.select=0;
+    merge_layer_select.innerHTML=selectOut;
 }
 
 function removeMergeLayer(index){
@@ -854,8 +890,8 @@ function removeMergeLayer(index){
         image_editing_data.adjust=image_editing_data.adjust.filter(v=>v!=null);
         if(isBase&&image_editing_data.adjust.length>0) image_editing_data.adjust[0].base=true;
 
-        updateMergeLayerSelect();
         drawMergeImage();
+        updateMergeLayerSelect();
     }
 }
 
@@ -864,22 +900,19 @@ function drawMergeImage() {
     if(drawMergeImageing) return;
     if (!image_editing_data.layer) return;
 
-    // 1. 尋找 Base (背景) 以確定畫布大小
     let base = image_editing_data.adjust.find(a => a.base);
     if (!base) {
         alert('沒有照片了QQ');
         setEditImage(null, 'NOPE');
         return;
     }
-    drawMergeImageing=true;
+    drawMergeImageing = true;
 
-    // 建立離屏 Canvas
     const canvas = document.createElement('canvas');
     canvas.width = base.w;
     canvas.height = base.h;
     const ctx = canvas.getContext('2d');
 
-    // 準備 Mask 用的 Canvas (如果有選取)
     let maskCanvas = null;
     let maskCtx = null;
     if (image_editing_data.select !== undefined && image_editing_data.select !== -1) {
@@ -889,34 +922,121 @@ function drawMergeImage() {
         maskCtx = maskCanvas.getContext('2d');
     }
 
-    // 2. 遍歷圖層並繪製
     for (let i = 0; i < image_editing_data.layer.length; i++) {
         const layerAdj = image_editing_data.adjust[i];
         let w = layerAdj.w;
         let h = layerAdj.h;
         let x = layerAdj.x;
         let y = layerAdj.y;
-
-        // 這是該圖片在畫布上的中心位置
+        
         let centerX = x + w / 2;
         let centerY = y + h / 2;
 
-        let srcMat = image_editing_data.layer[i].image;
-        let tempCanvas = document.createElement('canvas');
-        cv.imshow(tempCanvas, srcMat); 
+        let srcMat = image_editing_data.layer[i].image.mat_clone();
 
+        // ==========================================
+        // === 最終改良版：模糊擴散 (解決白邊 + 融合更自然) ===
+        // ==========================================
+        if (srcMat.channels() === 3) {
+            cv.cvtColor(srcMat, srcMat, cv.COLOR_RGB2RGBA);
+        }
+
+        if (srcMat.channels() === 4) {
+            let channels = new cv.MatVector();
+            cv.split(srcMat, channels);
+            
+            let r = channels.get(0);
+            let g = channels.get(1);
+            let b = channels.get(2);
+            let a = channels.get(3);
+
+            // --- 1. RGB 處理 (保持之前的邏輯，避免顏色髒掉) ---
+            // 雖然是向內縮，但為了防止原始圖片邊緣有白邊/雜訊，
+            // 我們還是先用模糊後的 RGB 打底，保證邊緣色彩純淨。
+            let rgb = new cv.Mat();
+            let rgbVec = new cv.MatVector();
+            rgbVec.push_back(r); rgbVec.push_back(g); rgbVec.push_back(b);
+            cv.merge(rgbVec, rgb);
+
+            let rgbBlurred = new cv.Mat();
+            // 稍微模糊 RGB，讓邊緣色彩均勻
+            cv.GaussianBlur(rgb, rgbBlurred, new cv.Size(15, 15), 0, 0, cv.BORDER_DEFAULT);
+
+            // 建立保護遮罩
+            let solidMask = new cv.Mat();
+            cv.threshold(a, solidMask, 1, 255, cv.THRESH_BINARY);
+            
+            // 合成 RGB：主要用清晰圖，邊緣微小瑕疵用模糊圖補
+            let finalRgb = rgbBlurred.clone();
+            rgb.copyTo(finalRgb, solidMask);
+
+            let finalRgbChannels = new cv.MatVector();
+            cv.split(finalRgb, finalRgbChannels);
+
+
+            // --- 2. Alpha 處理 (關鍵修改：向內滲透) ---
+            
+            // (A) 設定參數
+            // blurAmount: 模糊程度 (決定滲透多深)
+            // erodeAmount: 內縮程度 (防止長出去)
+            // 建議：erodeAmount 大約是 blurAmount 的 40% ~ 50%
+            let blurVal = 5; // 必須是奇數
+            let erodeVal = 2; // 內縮幾次 (次數越多，邊緣退縮越多)
+
+            // (B) 執行侵蝕 (Erode) - 讓 Alpha 變小
+            // 建立一個結構元素 (核心)
+            let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+            let a_eroded = new cv.Mat();
+            
+            // 執行 erode，iterations 決定縮小多少圈
+            cv.erode(a, a_eroded, kernel, new cv.Point(-1, -1), erodeVal);
+
+            // (C) 執行模糊 (Blur) - 讓縮小後的邊緣變軟
+            let a_final = new cv.Mat();
+            cv.GaussianBlur(a_eroded, a_final, new cv.Size(blurVal, blurVal), 0, 0, cv.BORDER_DEFAULT);
+
+            // --- 3. 合併回 srcMat ---
+            channels.set(0, finalRgbChannels.get(0));
+            channels.set(1, finalRgbChannels.get(1));
+            channels.set(2, finalRgbChannels.get(2));
+            channels.set(3, a_final);
+
+            cv.merge(channels, srcMat);
+
+            // --- 記憶體釋放 ---
+            channels.delete(); rgbVec.delete(); finalRgbChannels.delete();
+            r.delete(); g.delete(); b.delete(); a.delete();
+            rgb.delete(); rgbBlurred.delete(); solidMask.delete(); finalRgb.delete();
+            kernel.delete(); a_eroded.delete(); a_final.delete();
+        }
+        // ==========================================
+
+
+        let tempCanvas = document.createElement('canvas');
+        cv.imshow(tempCanvas, srcMat);
+        srcMat.delete();
+
+        // --- 繪製陰影 (保持不變) ---
+        // ctx.save();
+        // ctx.translate(centerX, centerY + (h * 0.45)); 
+        // ctx.rotate((layerAdj.rotate ?? 0) * Math.PI / 180);
+        // ctx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
+        // ctx.scale(1, 0.3); 
+        // ctx.filter = 'brightness(0) blur(10px) opacity(0.4)';
+        // ctx.drawImage(tempCanvas, -w / 2, -h / 2, w, h);
+        // ctx.restore();
+
+        // --- 繪製主體 ---
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.rotate((layerAdj.rotate ?? 0) * Math.PI / 180);
         ctx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
         ctx.drawImage(tempCanvas, -w / 2, -h / 2, w, h);
-
         ctx.restore();
 
         if (image_editing_data.select == i && maskCtx) {
             maskCtx.save();
             maskCtx.globalAlpha = 0.3;
-            
             maskCtx.translate(centerX, centerY);
             maskCtx.rotate((layerAdj.rotate ?? 0) * Math.PI / 180);
             maskCtx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
@@ -928,20 +1048,17 @@ function drawMergeImage() {
         tempCanvas = null; 
     }
 
-    // 3. (選擇性) 將合成結果轉回 cv.Mat
-    // 如果你之後還要用 cv.imshow 顯示，或者做其他 cv 處理
     let output = cv.imread(canvas);
     cv.imshow(image_editor_canvas, output);
-    output.delete(); // 顯示完就釋放
+    output.delete();
 
-    // 處理 Mask 顯示
     if (maskCanvas) {
         let outputMask = cv.imread(maskCanvas);
         cv.imshow(image_editor_mask_canvas, outputMask);
         outputMask.delete();
     }
 
-    drawMergeImageing=false;
+    drawMergeImageing = false;
 }
 
 function moveItemInArray(arr, fromIndex, toIndex) {
@@ -977,12 +1094,16 @@ function changeMergeBase(index){
                 const scale=Math.min(
                     base.w/image_editing_data.layer[i].image.cols,
                     base.h/image_editing_data.layer[i].image.rows,
+                    1,
                 );
 
                 image_editing_data.adjust[i].x=0;
                 image_editing_data.adjust[i].y=0;
                 image_editing_data.adjust[i].h=Math.floor(image_editing_data.layer[i].image.rows*scale);
                 image_editing_data.adjust[i].w=Math.floor(image_editing_data.layer[i].image.cols*scale);
+                image_editing_data.adjust[i].rotate=0;
+                image_editing_data.adjust[i].mirror_h=false;
+                image_editing_data.adjust[i].mirror_v=false;
             }
         }
 
@@ -991,12 +1112,12 @@ function changeMergeBase(index){
     }
 }
 
-function resizeMergeImage(index, scale=0){
+function resizeMergeImage(index, scale=0, xy=0){
     if(scale<=0) return;
     if(image_editing_data.mode&&image_editing_data.mode%10==2){
         if(0<=index&&index<image_editing_data.layer.length){
-            const h_=Math.floor(image_editing_data.adjust[index].h*scale);
-            const w_=Math.floor(image_editing_data.adjust[index].w*scale);
+            const h_=Math.floor(image_editing_data.adjust[index].h*((xy%2==1)?scale:1));
+            const w_=Math.floor(image_editing_data.adjust[index].w*((xy/2>=1)?scale:1));
             image_editing_data.adjust[index].x+=Math.floor((image_editing_data.adjust[index].w-w_)/2);
             image_editing_data.adjust[index].y+=Math.floor((image_editing_data.adjust[index].h-h_)/2);
             image_editing_data.adjust[index].h=h_;
@@ -1091,146 +1212,539 @@ function saveMergeImage(){
     fileUpdate();
 }
 
-
-function changeMergeImageColor(index, colorIntensity = 0.3){
-    if(image_editing_data.mode&&image_editing_data.mode%10==2){
-        if(0<=index&&index<image_editing_data.layer.length){
-            let src=-1;
-            if(image_editing_data.layer.length>2){
-                const ret=parseInt(prompt(`找到多個影像，請選擇目標的影像:\n${image_editing_data.layer.filter((v, i)=>i!=index).map((v, i)=>((i+1).toString()+': '+v.name)).join('\n')}`))-1;
-                if(0<=ret&&ret<image_editing_data.layer.length-1){
-                    src=(ret>=index)?ret+1:ret;
-                }else{
-                    alert('選擇不存在!');
-                    return;
-                }
-            }else if(image_editing_data.length<=1){
-                alert('只有一張圖片，無法調整!');
-                return;
-            }else{
-                src=(index+1)%2;
+function resetMergeImage(index){
+    if(image_editing_data.layer&&0<=index&&index<image_editing_data.layer.length){
+        let base=null;
+        for(let i=0;i<image_editing_data.adjust.length;i++){
+            if(image_editing_data.adjust[i].base){
+                base=image_editing_data.adjust[i];
             }
-            if(src<0){
-                alert('目標錯誤!');
-                return;
-            }
+        }
+        if(base==null) return;
 
-            let { rgb: tgtRGB, alpha: tgtAlpha } = RGBA2RGB(image_editing_data.layer[index].image);
-            let tgtLab = new cv.Mat();
-            cv.cvtColor(tgtRGB, tgtLab, cv.COLOR_RGB2Lab);
-            tgtLab.convertTo(tgtLab, cv.CV_32FC3);
-            tgtRGB.delete();
+        const scale=Math.min(
+            base.w/image_editing_data.layer[index].image.cols,
+            base.h/image_editing_data.layer[index].image.rows,
+            1,
+        );
 
-            // === 2. 準備 Source (5_2, 參考圖) ===
-            let { rgb: srcRGB, alpha: srcAlpha } = RGBA2RGB(image_editing_data.layer[src].image.mat_clone());
-            let srcLab = new cv.Mat();
-            cv.cvtColor(srcRGB, srcLab, cv.COLOR_RGB2Lab);
-            srcLab.convertTo(srcLab, cv.CV_32FC3);
-            srcRGB.delete();
+        image_editing_data.adjust[index].x=0;
+        image_editing_data.adjust[index].y=0;
+        image_editing_data.adjust[index].h=Math.floor(image_editing_data.layer[index].image.rows*scale);
+        image_editing_data.adjust[index].w=Math.floor(image_editing_data.layer[index].image.cols*scale);
+        image_editing_data.adjust[index].rotate=0;
+        image_editing_data.adjust[index].mirror_h=false;
+        image_editing_data.adjust[index].mirror_v=false;
 
-            let srcMean = new cv.Mat();
-            let srcStd = new cv.Mat();
-            let tgtMean = new cv.Mat();
-            let tgtStd = new cv.Mat();
+        drawMergeImage();
+    }
+}
 
-            // === 3. 關鍵修正：採樣計算 ===
 
-            // (A) 計算 Target (5_1) 的統計數據
-            // 這裡非常重要！必須把 alpha 當作 mask 傳進去。
-            // 否則 5_1 透明背景的黑色(0,0,0)會拉低平均值，導致算出來的結果大偏白。
-            cv.meanStdDev(tgtLab, tgtMean, tgtStd, tgtAlpha);
+function applyGrayWorldWhiteBalance(index) {
+    if(!(image_editing_data.layer&&0<=index&&index<image_editing_data.layer.length)) return;
 
-            // (B) 計算 Source (5_2) 的統計數據
-            // 使用 ROI 只看中間的臉部，避開草地
-            let roiX = Math.floor(srcLab.cols * 0.35);
-            let roiY = Math.floor(srcLab.rows * 0.25);
-            let roiW = Math.floor(srcLab.cols * 0.3);
-            let roiH = Math.floor(srcLab.rows * 0.3);
-            let rect = new cv.Rect(roiX, roiY, roiW, roiH);
-            let srcRoi = srcLab.roi(rect);
-            let srcAlphaRoi = srcAlpha.roi(rect);
-            cv.meanStdDev(srcRoi, srcMean, srcStd, srcAlphaRoi);
-            srcRoi.delete();
-            srcAlpha.delete();
-            srcAlphaRoi.delete();
+    let  result=grayWorldWhiteBalance(image_editing_data.layer[index].image);
+    image_editing_data.layer[index].image.delete();
+    image_editing_data.layer[index].image=result;
 
-            // === 4. 執行轉換 (改進版演算法) ===
-            
-            let tgtChannels = new cv.MatVector();
-            cv.split(tgtLab, tgtChannels);
-            
-            let originalA = tgtChannels.get(1).mat_clone();
-            let originalB = tgtChannels.get(2).mat_clone();
+    drawMergeImage();
+}
 
-            for (let i = 0; i < 3; i++) {
-                let channel = tgtChannels.get(i);
+function grayWorldWhiteBalance(src){
+    let output=src.mat_clone();
 
-                let sM = srcMean.doubleAt(i, 0); // Source Mean (5_2 的臉色)
-                let sS = srcStd.doubleAt(i, 0);  // Source Std
-                let tM = tgtMean.doubleAt(i, 0); // Target Mean (5_1 原本的顏色)
-                let tS = tgtStd.doubleAt(i, 0);  // Target Std
 
-                // --- 修正點：抑制標準差 (Contrast) 的影響 ---
-                // 為了不讓臉變橘 (不過度拉伸飽和度)，我們強行讓 scale 接近 1.0
-                // 也就是說：我們主要只做「加減法」(色偏)，不做「乘除法」(對比擴張)
-                
-                let rawScale = sS / (tS + 1e-6);
-                
-                // 混合率：0.0 代表完全不改變對比度，1.0 代表完全採用 Reinhard
-                // 老師的範例感覺只有色溫變了，對比度沒變，所以我們用很低的係數 (例如 0.1 或 0.0)
-                // 這樣可以避免顏色「炸開」
-                let contrastFactor = 0.15; 
-                let scale = 1.0 + (rawScale - 1.0) * contrastFactor;
+    let channels = new cv.MatVector();
+    cv.split(output, channels);
 
-                // 1. 減去自己的平均 (歸零)
-                let s = new cv.Mat(channel.rows, channel.cols, channel.type(), [tM, 0, 0, 0]);
-                cv.subtract(channel, s, channel);
-                s.delete();
+    let r = channels.get(0);
+    let g = channels.get(1);
+    let b = channels.get(2);
+    let a = channels.get(3);
 
-                // 2. 乘上被抑制過的比例
-                let m = new cv.Mat(channel.rows, channel.cols, channel.type(), [scale, 0, 0, 0]);
-                cv.multiply(channel, m, channel);
-                m.delete();
+    // 計算平均值
+    let meanR = cv.mean(r, a)[0];
+    let meanG = cv.mean(g, a)[0];
+    let meanB = cv.mean(b, a)[0];
 
-                // 3. 加上對方的平均 (上色)
-                let a = new cv.Mat(channel.rows, channel.cols, channel.type(), [sM, 0, 0, 0]);
-                cv.add(channel, a, channel);
-                a.delete();
-            }
+    // 灰度世界假設：平均值應該趨近於灰色
+    let avgGray = (meanR + meanG + meanB) / 3;
 
-            // === 5. 混合與輸出 ===
-            // L (亮度) 通道：通常保留原圖的亮度層次比較自然，或者只融合一點點
-            let newL = tgtChannels.get(0);
-            let originalL = tgtChannels.get(0).mat_clone(); // 這行其實上面沒備份，這裡邏輯上是已經被修改過的L
-            // 如果你覺得亮度變得太平，可以考慮不修改 L channel，只修改 A, B
-            // 但為了色溫一致，L 微調通常是需要的。
+    // 計算增益係數
+    let scaleR = avgGray / (meanR || 0.001);
+    let scaleG = avgGray / (meanG || 0.001);
+    let scaleB = avgGray / (meanB || 0.001);
 
-            let newA = tgtChannels.get(1);
-            let newB = tgtChannels.get(2);
+    // 應用增益 (利用 convertScaleAbs 或 multiply)
+    // 在 JS 中直接用 multiply scalar 比較麻煩，這裡用 convertScaleAbs 模擬線性變換
+    r.convertTo(r, -1, scaleR, 0);
+    g.convertTo(g, -1, scaleG, 0);
+    b.convertTo(b, -1, scaleB, 0);
 
-            // 根據 colorIntensity 融合回原圖
-            // 老師的範例看起來融合度很高，所以這裡可以讓 colorIntensity 接近 0.8 或 1.0
-            cv.addWeighted(originalL, 1.0 - colorIntensity, newL, colorIntensity, 0, newL);
-            cv.addWeighted(originalA, 1.0 - colorIntensity, newA, colorIntensity, 0, newA);
-            cv.addWeighted(originalB, 1.0 - colorIntensity, newB, colorIntensity, 0, newB);
+    cv.merge(channels, output);
 
-            // 清理內存
-            originalA.delete(); originalB.delete(); originalL.delete();
-            srcMean.delete(); srcStd.delete(); tgtMean.delete(); tgtStd.delete();
+    // 清理
+    channels.delete();
+    r.delete();
+    g.delete();
+    b.delete();
+    a.delete();
 
-            cv.merge(tgtChannels, tgtLab);
-            tgtLab.convertTo(tgtLab, cv.CV_8UC3);
-            
-            let resultRGB = new cv.Mat();
-            cv.cvtColor(tgtLab, resultRGB, cv.COLOR_Lab2RGB);
+    return output;
+}
 
-            // 寫回
-            image_editing_data.layer[index].image = RGB2RGBA(resultRGB, tgtAlpha);
+function applyGrayEdgeWhiteBalance(index) {
+    if(!(image_editing_data.layer&&0<=index&&index<image_editing_data.layer.length)) return;
 
-            drawMergeImage();
+    let  result=grayEdgeWhiteBalance(image_editing_data.layer[index].image);
+    image_editing_data.layer[index].image.delete();
+    image_editing_data.layer[index].image=result;
 
-            // 清理
-            tgtLab.delete(); tgtChannels.delete(); resultRGB.delete();
+    drawMergeImage();
+}
+
+function grayEdgeWhiteBalance(src) {
+    let output = src.clone();
+
+    // 1. 轉為 RGB (計算用)
+    let srcRGB = new cv.Mat();
+    cv.cvtColor(src, srcRGB, cv.COLOR_RGBA2RGB);
+
+    // 2. 分離通道
+    let channels = new cv.MatVector();
+    cv.split(srcRGB, channels);
+    let r = channels.get(0);
+    let g = channels.get(1);
+    let b = channels.get(2);
+
+    // 3. 計算邊緣 (Sobel)
+    // 使用 CV_32F 以避免數值溢位並支援 magnitude 計算
+    let ddepth = cv.CV_32F;
+    let ksize = 1; 
+    let scale = 1;
+    let delta = 0;
+
+    let rX = new cv.Mat(), rY = new cv.Mat();
+    let gX = new cv.Mat(), gY = new cv.Mat();
+    let bX = new cv.Mat(), bY = new cv.Mat();
+
+    // R 通道梯度
+    cv.Sobel(r, rX, ddepth, 1, 0, ksize, scale, delta, cv.BORDER_DEFAULT);
+    cv.Sobel(r, rY, ddepth, 0, 1, ksize, scale, delta, cv.BORDER_DEFAULT);
+    
+    // G 通道梯度
+    cv.Sobel(g, gX, ddepth, 1, 0, ksize, scale, delta, cv.BORDER_DEFAULT);
+    cv.Sobel(g, gY, ddepth, 0, 1, ksize, scale, delta, cv.BORDER_DEFAULT);
+    
+    // B 通道梯度
+    cv.Sobel(b, bX, ddepth, 1, 0, ksize, scale, delta, cv.BORDER_DEFAULT);
+    cv.Sobel(b, bY, ddepth, 0, 1, ksize, scale, delta, cv.BORDER_DEFAULT);
+
+    // 4. 【修正點】計算邊緣強度 (Magnitude)
+    // 原本錯誤的 cv.Mat.abs 已被移除，改用標準的 cv.magnitude
+    let rMag = new cv.Mat(), gMag = new cv.Mat(), bMag = new cv.Mat();
+    
+    cv.magnitude(rX, rY, rMag); // 計算 sqrt(rX^2 + rY^2)
+    cv.magnitude(gX, gY, gMag);
+    cv.magnitude(bX, bY, bMag);
+
+    // 5. Minkowski Norm (p=1, 取平均)
+    // 這裡我們計算所有邊緣強度的平均值
+    let meanR = cv.mean(rMag)[0];
+    let meanG = cv.mean(gMag)[0];
+    let meanB = cv.mean(bMag)[0];
+
+    // 6. 計算增益 (以平均邊緣強度為基準)
+    // 假設「平均邊緣顏色」應該是灰色的
+    let avgEdge = (meanR + meanG + meanB) / 3;
+    
+    // 避免除以 0
+    let scaleR = avgEdge / (meanR || 0.001);
+    let scaleG = avgEdge / (meanG || 0.001);
+    let scaleB = avgEdge / (meanB || 0.001);
+
+    // 7. 增益限制 (Clamping) - 安全機制
+    // 限制增益不要超過 2.0 倍，也不要小於 0.5
+    let maxGain = 2.0; 
+    let minGain = 0.5;
+
+    scaleR = Math.max(minGain, Math.min(scaleR, maxGain));
+    scaleG = Math.max(minGain, Math.min(scaleG, maxGain));
+    scaleB = Math.max(minGain, Math.min(scaleB, maxGain));
+
+    // 8. 應用增益到原圖
+    // 因為 scale 是針對 32F 的計算結果，但原圖是 8U，convertScaleAbs 可以直接處理縮放並轉回 8U
+    let outChannels = new cv.MatVector();
+    cv.split(output, outChannels);
+    
+    outChannels.get(0).convertTo(outChannels.get(0), -1, scaleR, 0);
+    outChannels.get(1).convertTo(outChannels.get(1), -1, scaleG, 0);
+    outChannels.get(2).convertTo(outChannels.get(2), -1, scaleB, 0);
+    
+    cv.merge(outChannels, output);
+
+    // 9. 清理記憶體
+    srcRGB.delete(); channels.delete(); 
+    r.delete(); g.delete(); b.delete();
+    rX.delete(); rY.delete(); gX.delete(); gY.delete(); bX.delete(); bY.delete();
+    rMag.delete(); gMag.delete(); bMag.delete(); 
+    outChannels.delete();
+
+    return output;
+}
+
+function applyRobustWhitePatchWhiteBalance(index, iterations = 2) {
+    if(!(image_editing_data.layer&&0<=index&&index<image_editing_data.layer.length)) return;
+
+
+    let  result=robustWhitePatchWhiteBalance(image_editing_data.layer[index].image);
+    image_editing_data.layer[index].image.delete();
+    image_editing_data.layer[index].image=result;
+
+    drawMergeImage();
+}
+
+function robustWhitePatchWhiteBalance(src) {
+    let output = src.clone();
+    
+    // 1. 轉換到 HSV 色彩空間來分析飽和度
+    let hsv = new cv.Mat();
+    let srcRGB = new cv.Mat();
+    // OpenCV.js 的 input 通常是 RGBA，轉換前建議先轉 RGB
+    cv.cvtColor(src, srcRGB, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(srcRGB, hsv, cv.COLOR_RGB2HSV);
+
+    // 2. 分離通道 (H, S, V)
+    let hsvChannels = new cv.MatVector();
+    cv.split(hsv, hsvChannels);
+    let s = hsvChannels.get(1); // 飽和度
+    let v = hsvChannels.get(2); // 亮度 (Value)
+
+    // 3. 找出亮度的閾值 (Top 1% 最亮)
+    // 為了效能，這裡簡化計算，直接找亮度直方圖
+    let histSize = [256];
+    let ranges = [0, 255];
+    let hist = new cv.Mat();
+    let maskBrightness = new cv.Mat();
+    let maskSaturation = new cv.Mat();
+    let finalMask = new cv.Mat();
+    let none = new cv.Mat();
+    let vVec = new cv.MatVector(); 
+    vVec.push_back(v);
+
+    cv.calcHist(vVec, [0], none, hist, histSize, ranges);
+
+    let totalPixels = src.rows * src.cols;
+    let topPercentileCount = totalPixels * 0.01; // 取前 1%
+    let brightnessThreshold = 255;
+    let currentCount = 0;
+
+    for (let i = 255; i >= 0; i--) {
+        currentCount += hist.data32F[i];
+        if (currentCount >= topPercentileCount) {
+            brightnessThreshold = i;
+            break;
         }
     }
+
+    // 4. 建立遮罩
+    // 條件 A: 亮度夠高 ( >= brightnessThreshold )
+    cv.threshold(v, maskBrightness, brightnessThreshold, 255, cv.THRESH_BINARY);
+    
+    // 條件 B: 飽和度夠低 ( <= 60 ) -> 0~255 範圍中，60 大約是 23% 的飽和度
+    // 這樣可以過濾掉鮮豔的顏色 (如紅花、綠葉)，只保留接近白色/灰色的高光
+    cv.threshold(s, maskSaturation, 60, 255, cv.THRESH_BINARY_INV);
+
+    // 5. 結合兩個條件 (Mask = Brightness AND LowSaturation)
+    cv.bitwise_and(maskBrightness, maskSaturation, finalMask);
+
+    // 【安全機制】如果畫面中完全沒有「亮且不鮮豔」的點（例如全畫面都是鮮紅），
+    // finalMask 會幾乎全黑。這時應該放棄修正或改用 Gray World，
+    // 這裡我們選擇：若有效像素太少，就不做強烈修正 (降級為全圖平均)
+    let validPixels = cv.countNonZero(finalMask);
+    if (validPixels < 10) { 
+        // 找不到參考白點，回退使用 Gray World 或放棄
+        // 這裡示範簡單的 fallback: 把 mask 設為全白 (退化成 Gray World)
+        finalMask.setTo(new cv.Scalar(255)); 
+    }
+
+    // 6. 計算參考白色的平均值
+    let meanScalar = cv.mean(srcRGB, finalMask); // 這裡用 srcRGB 算比較準
+    let meanR = meanScalar[0];
+    let meanG = meanScalar[1];
+    let meanB = meanScalar[2];
+
+    // 7. 計算增益 (Gain) - 加入安全限制 (Clamp)
+    // 你的 C++ 代碼中限制最大增益為 3.0，這也是一個很好的保護機制
+    let maxGain = 2.5; // 稍微保守一點
+    let minGain = 0.4; // 防止過度壓暗
+
+    // 避免除以 0
+    let avgGray = (meanR + meanG + meanB) / 3;
+    let scaleR = (meanR > 1) ? (avgGray / meanR) : 1.0; 
+    let scaleG = (meanG > 1) ? (avgGray / meanG) : 1.0;
+    let scaleB = (meanB > 1) ? (avgGray / meanB) : 1.0;
+
+    // 這裡改用 "保持亮度" 的策略：把最大通道拉到 255 (這是 White Patch 的原意)
+    // 或者用 "平均灰" 策略。這裡採用 White Patch 的標準做法：
+    // 目標是讓 (R,G,B) 都變成 max(R,G,B) 或是 255
+    let maxVal = Math.max(meanR, Math.max(meanG, meanB));
+    scaleR = (meanR > 1) ? (maxVal / meanR) : 1.0;
+    scaleG = (meanG > 1) ? (maxVal / meanG) : 1.0;
+    scaleB = (meanB > 1) ? (maxVal / meanB) : 1.0;
+
+    // 限制增益範圍 (Clamping)
+    scaleR = Math.max(minGain, Math.min(scaleR, maxGain));
+    scaleG = Math.max(minGain, Math.min(scaleG, maxGain));
+    scaleB = Math.max(minGain, Math.min(scaleB, maxGain));
+
+    // 8. 應用增益
+    let channels = new cv.MatVector();
+    cv.split(output, channels);
+    channels.get(0).convertTo(channels.get(0), -1, scaleR, 0);
+    channels.get(1).convertTo(channels.get(1), -1, scaleG, 0);
+    channels.get(2).convertTo(channels.get(2), -1, scaleB, 0);
+    cv.merge(channels, output);
+
+    // 清理記憶體
+    hsv.delete(); srcRGB.delete(); hsvChannels.delete(); s.delete(); v.delete();
+    hist.delete(); maskBrightness.delete(); maskSaturation.delete(); finalMask.delete();
+    none.delete(); vVec.delete(); channels.delete();
+
+    return output;
+}
+
+function colorMatch(refIndex, targetIndex) {
+    let refSrc = image_editing_data.layer[refIndex].image;
+    let tgtSrc = image_editing_data.layer[targetIndex].image;
+
+    // 轉換到 Lab 空間
+    let refLab = new cv.Mat();
+    cv.cvtColor(refSrc, refLab, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(refLab, refLab, cv.COLOR_RGB2Lab);
+    
+    // 使用你原本處理目標圖層 Alpha 的方式
+    let {rgb: tgtLab, alpha: tgtAlpha} = RGBA2RGB(tgtSrc);
+    cv.cvtColor(tgtLab, tgtLab, cv.COLOR_RGB2Lab);
+
+    let refChannels = new cv.MatVector();
+    let tgtChannels = new cv.MatVector();
+    cv.split(refLab, refChannels);
+    cv.split(tgtLab, tgtChannels);
+
+    /**
+     * 改良版遮罩：結合亮度過濾與邊緣檢測 (Gray Edge 思路)
+     */
+    function createEdgeEnhancedMask(labMat) {
+        let channels = new cv.MatVector();
+        cv.split(labMat, channels);
+        let L = channels.get(0); // 亮度通道
+        
+        // 1. 亮度過濾 (排除極端值)
+        let rangeMask = new cv.Mat();
+        cv.inRange(L, new cv.Mat(1, 1, cv.CV_8U, [40, 0, 0, 0]), new cv.Mat(1, 1, cv.CV_8U, [220, 0, 0, 0]), rangeMask);
+
+        // 2. 邊緣檢測 (Sobel)
+        let gradX = new cv.Mat();
+        let gradY = new cv.Mat();
+        let gradAbs = new cv.Mat();
+        cv.Sobel(L, gradX, cv.CV_16S, 1, 0, 3); // X 方向梯度
+        cv.Sobel(L, gradY, cv.CV_16S, 0, 1, 3); // Y 方向梯度
+        cv.convertScaleAbs(gradX, gradX);
+        cv.convertScaleAbs(gradY, gradY);
+        cv.addWeighted(gradX, 0.5, gradY, 0.5, 0, gradAbs); // 合併梯度
+
+        // 3. 取得高梯度區域 (排除平滑的大色塊)
+        let edgeMask = new cv.Mat();
+        // 門檻值 20-40 之間可調整，越大代表越只看「細節」
+        cv.threshold(gradAbs, edgeMask, 30, 255, cv.THRESH_BINARY);
+
+        // 4. 合併遮罩：又是中間亮度，又是邊緣
+        let finalMask = new cv.Mat();
+        cv.bitwise_and(rangeMask, edgeMask, finalMask);
+
+        // 清理暫存
+        channels.delete(); L.delete(); rangeMask.delete(); 
+        gradX.delete(); gradY.delete(); gradAbs.delete(); edgeMask.delete();
+        
+        return finalMask;
+    }
+
+    let refMask = createEdgeEnhancedMask(refLab);
+    let tgtMask = createEdgeEnhancedMask(tgtLab);
+
+    // 檢查遮罩是否太稀疏 (如果圖太糊沒邊緣，則退回用亮度遮罩)
+    if (cv.countNonZero(refMask) < 100 || cv.countNonZero(tgtMask) < 100) {
+        // ...這裡可以寫退路邏輯，或者調低 threshold...
+    }
+
+    let mRef = new cv.Mat();
+    let sRef = new cv.Mat();
+    let mTgt = new cv.Mat();
+    let sTgt = new cv.Mat();
+
+    for (let i = 0; i < 3; i++) {
+        let rChan = refChannels.get(i);
+        let tChan = tgtChannels.get(i);
+
+        cv.meanStdDev(rChan, mRef, sRef, refMask);
+        cv.meanStdDev(tChan, mTgt, sTgt, tgtMask);
+
+        let muRef = mRef.doubleAt(0);
+        let sigmaRef = sRef.doubleAt(0);
+        let muTgt = mTgt.doubleAt(0);
+        let sigmaTgt = sTgt.doubleAt(0);
+
+        let alpha = sigmaRef / (sigmaTgt || 0.001);
+        let beta = muRef - (muTgt * alpha);
+        
+        tChan.convertTo(tChan, -1, alpha, beta);
+    }
+
+    // 合併與還原
+    cv.merge(tgtChannels, tgtLab);
+    cv.cvtColor(tgtLab, tgtLab, cv.COLOR_Lab2RGB);
+    
+    image_editing_data.layer[targetIndex].image = RGB2RGBA(tgtLab, tgtAlpha);
+
+    // 清理所有記憶體
+    refLab.delete(); refChannels.delete(); tgtChannels.delete();
+    refMask.delete(); tgtMask.delete();
+    mRef.delete(); sRef.delete(); mTgt.delete(); sTgt.delete();
+
+    drawMergeImage();
+}
+
+function saveMergeImageSeamless() {
+    if (!image_editing_data.layer) return;
+
+    // 1. 尋找 Base (背景) 以確定畫布大小
+    let baseIndex = 0;
+    let base = image_editing_data.adjust.find((a, i) => {
+        baseIndex = i;
+        return a.base
+    });
+
+    if (!base) {
+        alert('沒有照片了QQ');
+        setEditImage(null, 'NOPE');
+        return;
+    }
+
+    // 準備最終結果的 Mat (Dst)
+    let baseMatRGBA = image_editing_data.layer[baseIndex].image.clone();
+    let dstRGB = new cv.Mat();
+    cv.cvtColor(baseMatRGBA, dstRGB, cv.COLOR_RGBA2RGB);
+    baseMatRGBA.delete();
+
+    // 2. 遍歷圖層
+    for (let i = 0; i < image_editing_data.layer.length; i++) {
+        if (i === baseIndex) continue;
+
+        const layerAdj = image_editing_data.adjust[i];
+        
+        let w = layerAdj.w;
+        let h = layerAdj.h;
+        // 這是物件在底圖上的目標中心點座標 (重要！)
+        let targetCenterX = layerAdj.x + w / 2;
+        let targetCenterY = layerAdj.y + h / 2;
+
+        // --- 步驟 A: 計算旋轉後的 Bounding Box ---
+        // 因為旋轉後圖片佔用的寬高會變大，我們需要計算一個剛好能裝下的 Canvas
+        let angle = (layerAdj.rotate ?? 0);
+        let rad = angle * Math.PI / 180;
+        
+        // 計算旋轉後的新寬高 (Bounding Box)
+        let patchW = Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad));
+        let patchH = Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad));
+
+        // 建立「切片」大小的 Canvas
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = patchW;
+        tempCanvas.height = patchH;
+        const ctx = tempCanvas.getContext('2d');
+
+        let srcMat = image_editing_data.layer[i].image;
+        let assetCanvas = document.createElement('canvas');
+        cv.imshow(assetCanvas, srcMat);
+
+        ctx.save();
+        // 將繪製原點移到小 Canvas 的中心
+        ctx.translate(patchW / 2, patchH / 2);
+        ctx.rotate(rad);
+        ctx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
+        // 畫圖 (以自身中心為基準)
+        ctx.drawImage(assetCanvas, -w / 2, -h / 2, w, h);
+        ctx.restore();
+
+        // --- 步驟 B: 準備 SeamlessClone ---
+        
+        // 1. 讀取切片 Canvas
+        let layerFullRGBA = cv.imread(tempCanvas);
+        
+        // 2. 分離通道
+        let layerVector = new cv.MatVector();
+        cv.split(layerFullRGBA, layerVector);
+        
+        let layerRGB = new cv.Mat();
+        let layerAlpha = layerVector.get(3);
+        
+        let tempVec = new cv.MatVector();
+        tempVec.push_back(layerVector.get(0));
+        tempVec.push_back(layerVector.get(1));
+        tempVec.push_back(layerVector.get(2));
+        cv.merge(tempVec, layerRGB);
+
+        // 3. 處理 Mask (二值化)
+        cv.threshold(layerAlpha, layerAlpha, 10, 255, cv.THRESH_BINARY);
+
+        // --- 步驟 C: 執行 SeamlessClone ---
+        
+        // 關鍵修正：這裡的 center 要設定為「物件在 Base 上的絕對座標」
+        // 因為 src 只是那個小切片，seamlessClone 會把 src 的中心對齊到這裡
+        let center = new cv.Point(targetCenterX, targetCenterY);
+        
+        let clonedOutput = new cv.Mat();
+        
+        try {
+            // 檢查邊界：如果 center 太靠近邊緣，seamlessClone 可能會報錯或崩潰
+            // 簡單檢查一下 (非必要，但在邊緣操作時較安全)
+            if (targetCenterX > 0 && targetCenterX < base.w && targetCenterY > 0 && targetCenterY < base.h) {
+                 cv.seamlessClone(layerRGB, dstRGB, layerAlpha, center, clonedOutput, cv.MIXED_CLONE);
+                 
+                 dstRGB.delete(); 
+                 dstRGB = clonedOutput; 
+            } else {
+                console.warn("Layer " + i + " is out of bounds, skipping seamless clone.");
+                clonedOutput.delete();
+            }
+        } catch (e) {
+            console.error("SeamlessClone failed for layer " + i, e);
+            clonedOutput.delete();
+        }
+
+        // --- 步驟 D: 清理 ---
+        layerFullRGBA.delete();
+        layerVector.delete();
+        layerRGB.delete();
+        layerAlpha.delete();
+        tempVec.delete();
+        assetCanvas = null;
+    }
+
+    // 3. 輸出結果
+    // 這裡記得要用 dstRGB，它是被累積更新的結果
+    let finalRGBA = RGB2RGBA(dstRGB, new cv.Mat(dstRGB.rows, dstRGB.cols, cv.CV_8UC1, new cv.Scalar(255)));
+    
+    imageList.push({
+        name: "merge_seamless_" + image_editing_data.layer[baseIndex].name,
+        image: finalRGBA,
+        uuid: uuid(),
+        type: TYPE.ORIGIN,
+        height: base.h,
+        width: base.w,
+        parent: image_editing_data.layer[baseIndex].uuid,
+    });
+    fileUpdate();
 }
