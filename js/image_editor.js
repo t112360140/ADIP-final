@@ -1,4 +1,4 @@
-var set2Width=256;
+var set2Width=-1;
 var GrabCutIterCount=2;
 
 
@@ -600,9 +600,9 @@ function addGrabCut(pos, size=3){
     if(image_editing_data.grabCutFirst){
         const scale=set2Width>0?set2Width/image_editing_data.img.image.cols:1;
         if(image_editing_data.grabCutAdd==1){
-            cv.circle(image_editing_data.mask, new cv.Point(pos.x*scale, pos.y*scale), size, new cv.Scalar(cv.GC_FGD), -1);
+            cv.circle(image_editing_data.mask, new cv.Point(pos.x*scale, pos.y*scale), size*scale, new cv.Scalar(cv.GC_FGD), -1);
         }else if(image_editing_data.grabCutAdd==2){
-            cv.circle(image_editing_data.mask, new cv.Point(pos.x*scale, pos.y*scale), size, new cv.Scalar(cv.GC_BGD), -1);
+            cv.circle(image_editing_data.mask, new cv.Point(pos.x*scale, pos.y*scale), size*scale, new cv.Scalar(cv.GC_BGD), -1);
         }
     }
 }
@@ -900,164 +900,164 @@ function drawMergeImage() {
     if(drawMergeImageing) return;
     if (!image_editing_data.layer) return;
 
-    let base = image_editing_data.adjust.find(a => a.base);
-    if (!base) {
+    let baseInfo = image_editing_data.adjust.find(a => a.base);
+    if (!baseInfo) {
         alert('沒有照片了QQ');
         setEditImage(null, 'NOPE');
         return;
     }
     drawMergeImageing = true;
 
+    // --- 準備底圖 Mat (僅作為 Light Wrap 的參考取樣) ---
+    let baseLayerIdx = image_editing_data.adjust.findIndex(a => a.base);
+    let baseMatFull = image_editing_data.layer[baseLayerIdx].image.mat_clone(); 
+    if (baseMatFull.channels() === 4) cv.cvtColor(baseMatFull, baseMatFull, cv.COLOR_RGBA2RGB);
+
     const canvas = document.createElement('canvas');
-    canvas.width = base.w;
-    canvas.height = base.h;
+    canvas.width = baseInfo.w;
+    canvas.height = baseInfo.h;
     const ctx = canvas.getContext('2d');
 
-    let maskCanvas = null;
-    let maskCtx = null;
-    if (image_editing_data.select !== undefined && image_editing_data.select !== -1) {
-        maskCanvas = document.createElement('canvas');
-        maskCanvas.width = base.w;
-        maskCanvas.height = base.h;
-        maskCtx = maskCanvas.getContext('2d');
-    }
+    // --- 高階漸變參數 ---
+    const featherRange = 2;        // 羽化寬度 (像素)，數值越大，漸變越長越柔和
+    const lightWrapIntensity = 0.3; // 光線滲透強度
+    const lightWrapBlur = 7;       // 光線擴散範圍
 
     for (let i = 0; i < image_editing_data.layer.length; i++) {
         const layerAdj = image_editing_data.adjust[i];
-        let w = layerAdj.w;
-        let h = layerAdj.h;
-        let x = layerAdj.x;
-        let y = layerAdj.y;
-        
-        let centerX = x + w / 2;
-        let centerY = y + h / 2;
+        let w = Math.floor(layerAdj.w), h = Math.floor(layerAdj.h);
+        let x = Math.floor(layerAdj.x), y = Math.floor(layerAdj.y);
+        let centerX = x + w / 2, centerY = y + h / 2;
 
-        let srcMat = image_editing_data.layer[i].image.mat_clone();
+        let srcMat;
 
-        // ==========================================
-        // === 最終改良版：模糊擴散 (解決白邊 + 融合更自然) ===
-        // ==========================================
-        if (srcMat.channels() === 3) {
-            cv.cvtColor(srcMat, srcMat, cv.COLOR_RGB2RGBA);
+        if (layerAdj.base) {
+            srcMat = image_editing_data.layer[i].image.mat_clone();
+        } else {
+            // --- 前景圖層處理 ---
+            let rawMat = image_editing_data.layer[i].image.mat_clone();
+            srcMat = new cv.Mat();
+            cv.resize(rawMat, srcMat, new cv.Size(w, h), 0, 0, cv.INTER_LANCZOS4);
+            rawMat.delete();
+
+            if (srcMat.channels() === 3) cv.cvtColor(srcMat, srcMat, cv.COLOR_RGB2RGBA);
+
+            if (srcMat.channels() === 4) {
+                let channels = new cv.MatVector();
+                cv.split(srcMat, channels);
+                let a = channels.get(3);
+
+                // ==========================================
+                // === 優化後的平滑羽化 (Anti-aliasing Fix) ===
+                // ==========================================
+                
+                let alphaFinal = new cv.Mat();
+                
+                // 1. 二值化 (Threshold)
+                // 先將 Alpha 轉為純黑白，避免原本半透明的雜訊影響距離計算
+                // 這能確保邊緣是乾淨的，雖然這一步會暫時產生鋸齒，但後面的 Blur 會修復它
+                let binaryMask = new cv.Mat();
+                cv.threshold(a, binaryMask, 127, 255, cv.THRESH_BINARY);
+
+                // 2. 內蝕 (Erode) - 移除白邊/髒邊
+                // 使用稍微大一點的 kernel 或者多次迭代來確保髒邊被去除
+                let kErode = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+                cv.erode(binaryMask, binaryMask, kErode);
+                
+                // 3. 距離變換 (Distance Transform)
+                let dist = new cv.Mat();
+                cv.distanceTransform(binaryMask, dist, cv.DIST_L2, 5);
+                
+                // 4. 映射距離到 Alpha
+                // 這裡我們產生初步的 Alpha，但之後會依賴 Blur 來做真正的反鋸齒
+                dist.convertTo(alphaFinal, cv.CV_8U, 255.0 / featherRange); 
+
+                // 5. 【關鍵修改】使用更強的 GaussianBlur 來消除鋸齒
+                // 如果 featherRange 很小(如 2)，3x3 的 blur 不足以消除距離變換帶來的階梯感。
+                // 建議根據 featherRange 動態調整 blur 大小，至少 5x5 或更大。
+                // 這步操作才是真正產生「平滑邊緣」的關鍵。
+                let blurSize = Math.max(3, (featherRange * 2) + 1); 
+                // 確保 blurSize 是奇數
+                if (blurSize % 2 === 0) blurSize++; 
+                
+                cv.GaussianBlur(alphaFinal, alphaFinal, new cv.Size(blurSize, blurSize), 0);
+
+                // ==========================================
+                // === 光線包裹 (Light Wrap) 邏輯 (保持不變) ===
+                // ==========================================
+                // 注意：這裡你的 Light Wrap 邏輯依賴 alphaFinal
+                // 現在 alphaFinal 已經經過平滑處理，Light Wrap 的效果也會更自然
+                
+                let x1 = Math.max(0, x), y1 = Math.max(0, y);
+                let x2 = Math.min(baseMatFull.cols, x + w);
+                let y2 = Math.min(baseMatFull.rows, y + h);
+                let overlapW = x2 - x1, overlapH = y2 - y1;
+
+                if (overlapW > 0 && overlapH > 0) {
+                    try {
+                        let rect = new cv.Rect(x1, y1, overlapW, overlapH);
+                        let bgROI = baseMatFull.roi(rect);
+                        let bgMatched = new cv.Mat.zeros(h, w, cv.CV_8UC3);
+                        let destRect = new cv.Rect(x1 - x, y1 - y, overlapW, overlapH);
+                        let bgMatchedROI = bgMatched.roi(destRect);
+                        bgROI.copyTo(bgMatchedROI);
+
+                        let bgGray = new cv.Mat();
+                        cv.cvtColor(bgMatched, bgGray, cv.COLOR_RGB2GRAY);
+                        let brightMask = new cv.Mat();
+                        cv.threshold(bgGray, brightMask, 180, 255, cv.THRESH_BINARY);
+
+                        let wrapZone = new cv.Mat();
+                        cv.bitwise_not(alphaFinal, wrapZone); 
+                        // 使用 binaryMask 而不是 a，確保光不會滲透到完全透明的地方
+                        cv.bitwise_and(wrapZone, binaryMask, wrapZone); 
+
+                        let lightToApply = new cv.Mat();
+                        cv.bitwise_and(brightMask, wrapZone, lightToApply);
+                        cv.GaussianBlur(lightToApply, lightToApply, new cv.Size(lightWrapBlur, lightWrapBlur), 0);
+
+                        let bgChannels = new cv.MatVector();
+                        cv.split(bgMatched, bgChannels);
+                        for (let j = 0; j < 3; j++) {
+                            let ch = channels.get(j);
+                            let lightLayer = new cv.Mat();
+                            cv.multiply(bgChannels.get(j), lightToApply, lightLayer, lightWrapIntensity / 255.0);
+                            cv.add(ch, lightLayer, ch);
+                            lightLayer.delete();
+                        }
+
+                        bgROI.delete(); bgMatched.delete(); bgMatchedROI.delete(); bgGray.delete();
+                        brightMask.delete(); wrapZone.delete(); lightToApply.delete(); bgChannels.delete();
+                    } catch (e) { console.error("Light Wrap failed:", e); }
+                }
+
+                channels.set(3, alphaFinal);
+                cv.merge(channels, srcMat);
+
+                // 記憶體清理
+                binaryMask.delete(); kErode.delete(); dist.delete(); alphaFinal.delete();
+                channels.delete(); a.delete();
+            }
         }
-
-        if (srcMat.channels() === 4) {
-            let channels = new cv.MatVector();
-            cv.split(srcMat, channels);
-            
-            let r = channels.get(0);
-            let g = channels.get(1);
-            let b = channels.get(2);
-            let a = channels.get(3);
-
-            // --- 1. RGB 處理 (保持之前的邏輯，避免顏色髒掉) ---
-            // 雖然是向內縮，但為了防止原始圖片邊緣有白邊/雜訊，
-            // 我們還是先用模糊後的 RGB 打底，保證邊緣色彩純淨。
-            let rgb = new cv.Mat();
-            let rgbVec = new cv.MatVector();
-            rgbVec.push_back(r); rgbVec.push_back(g); rgbVec.push_back(b);
-            cv.merge(rgbVec, rgb);
-
-            let rgbBlurred = new cv.Mat();
-            // 稍微模糊 RGB，讓邊緣色彩均勻
-            cv.GaussianBlur(rgb, rgbBlurred, new cv.Size(15, 15), 0, 0, cv.BORDER_DEFAULT);
-
-            // 建立保護遮罩
-            let solidMask = new cv.Mat();
-            cv.threshold(a, solidMask, 1, 255, cv.THRESH_BINARY);
-            
-            // 合成 RGB：主要用清晰圖，邊緣微小瑕疵用模糊圖補
-            let finalRgb = rgbBlurred.clone();
-            rgb.copyTo(finalRgb, solidMask);
-
-            let finalRgbChannels = new cv.MatVector();
-            cv.split(finalRgb, finalRgbChannels);
-
-
-            // --- 2. Alpha 處理 (關鍵修改：向內滲透) ---
-            
-            // (A) 設定參數
-            // blurAmount: 模糊程度 (決定滲透多深)
-            // erodeAmount: 內縮程度 (防止長出去)
-            // 建議：erodeAmount 大約是 blurAmount 的 40% ~ 50%
-            let blurVal = 5; // 必須是奇數
-            let erodeVal = 2; // 內縮幾次 (次數越多，邊緣退縮越多)
-
-            // (B) 執行侵蝕 (Erode) - 讓 Alpha 變小
-            // 建立一個結構元素 (核心)
-            let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
-            let a_eroded = new cv.Mat();
-            
-            // 執行 erode，iterations 決定縮小多少圈
-            cv.erode(a, a_eroded, kernel, new cv.Point(-1, -1), erodeVal);
-
-            // (C) 執行模糊 (Blur) - 讓縮小後的邊緣變軟
-            let a_final = new cv.Mat();
-            cv.GaussianBlur(a_eroded, a_final, new cv.Size(blurVal, blurVal), 0, 0, cv.BORDER_DEFAULT);
-
-            // --- 3. 合併回 srcMat ---
-            channels.set(0, finalRgbChannels.get(0));
-            channels.set(1, finalRgbChannels.get(1));
-            channels.set(2, finalRgbChannels.get(2));
-            channels.set(3, a_final);
-
-            cv.merge(channels, srcMat);
-
-            // --- 記憶體釋放 ---
-            channels.delete(); rgbVec.delete(); finalRgbChannels.delete();
-            r.delete(); g.delete(); b.delete(); a.delete();
-            rgb.delete(); rgbBlurred.delete(); solidMask.delete(); finalRgb.delete();
-            kernel.delete(); a_eroded.delete(); a_final.delete();
-        }
-        // ==========================================
-
 
         let tempCanvas = document.createElement('canvas');
         cv.imshow(tempCanvas, srcMat);
         srcMat.delete();
 
-        // --- 繪製陰影 (保持不變) ---
-        // ctx.save();
-        // ctx.translate(centerX, centerY + (h * 0.45)); 
-        // ctx.rotate((layerAdj.rotate ?? 0) * Math.PI / 180);
-        // ctx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
-        // ctx.scale(1, 0.3); 
-        // ctx.filter = 'brightness(0) blur(10px) opacity(0.4)';
-        // ctx.drawImage(tempCanvas, -w / 2, -h / 2, w, h);
-        // ctx.restore();
-
-        // --- 繪製主體 ---
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.rotate((layerAdj.rotate ?? 0) * Math.PI / 180);
         ctx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(tempCanvas, -w / 2, -h / 2, w, h);
         ctx.restore();
-
-        if (image_editing_data.select == i && maskCtx) {
-            maskCtx.save();
-            maskCtx.globalAlpha = 0.3;
-            maskCtx.translate(centerX, centerY);
-            maskCtx.rotate((layerAdj.rotate ?? 0) * Math.PI / 180);
-            maskCtx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
-            maskCtx.drawImage(tempCanvas, -w / 2, -h / 2, w, h);
-            maskCtx.globalAlpha = 1.0;
-            maskCtx.restore();
-        }
-        
-        tempCanvas = null; 
     }
 
+    baseMatFull.delete();
     let output = cv.imread(canvas);
     cv.imshow(image_editor_canvas, output);
     output.delete();
-
-    if (maskCanvas) {
-        let outputMask = cv.imread(maskCanvas);
-        cv.imshow(image_editor_mask_canvas, outputMask);
-        outputMask.delete();
-    }
-
     drawMergeImageing = false;
 }
 
@@ -1163,42 +1163,8 @@ function saveMergeImage(){
         return;
     }
 
-    // 建立離屏 Canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = base.w;
-    canvas.height = base.h;
-    const ctx = canvas.getContext('2d');
-
-    // 2. 遍歷圖層並繪製
-    for (let i = 0; i < image_editing_data.layer.length; i++) {
-        const layerAdj = image_editing_data.adjust[i];
-        let w = layerAdj.w;
-        let h = layerAdj.h;
-        let x = layerAdj.x;
-        let y = layerAdj.y;
-
-        // 這是該圖片在畫布上的中心位置
-        let centerX = x + w / 2;
-        let centerY = y + h / 2;
-
-        let srcMat = image_editing_data.layer[i].image;
-        let tempCanvas = document.createElement('canvas');
-        cv.imshow(tempCanvas, srcMat); 
-
-        ctx.save();
-        ctx.translate(centerX, centerY);
-        ctx.rotate((layerAdj.rotate ?? 0) * Math.PI / 180);
-        ctx.scale(layerAdj.mirror_h ? -1 : 1, layerAdj.mirror_v ? -1 : 1);
-        ctx.drawImage(tempCanvas, -w / 2, -h / 2, w, h);
-
-        ctx.restore();
-        
-        tempCanvas = null; 
-    }
-
-    // 3. (選擇性) 將合成結果轉回 cv.Mat
-    // 如果你之後還要用 cv.imshow 顯示，或者做其他 cv 處理
-    let output = cv.imread(canvas);
+    drawMergeImage();
+    let output = cv.imread(image_editor_canvas);
 
     imageList.push({
         name: "merge_"+image_editing_data.layer[baseIndex].name,
@@ -1207,7 +1173,6 @@ function saveMergeImage(){
         type: TYPE.ORIGIN,
         height: base.h,
         width: base.w,
-        parent: image_editing_data.layer[baseIndex].uuid,
     });
     fileUpdate();
 }
@@ -1711,7 +1676,7 @@ function saveMergeImageSeamless() {
             // 檢查邊界：如果 center 太靠近邊緣，seamlessClone 可能會報錯或崩潰
             // 簡單檢查一下 (非必要，但在邊緣操作時較安全)
             if (targetCenterX > 0 && targetCenterX < base.w && targetCenterY > 0 && targetCenterY < base.h) {
-                 cv.seamlessClone(layerRGB, dstRGB, layerAlpha, center, clonedOutput, cv.MIXED_CLONE);
+                 cv.seamlessClone(layerRGB, dstRGB, layerAlpha, center, clonedOutput, cv.NORMAL_CLONE);
                  
                  dstRGB.delete(); 
                  dstRGB = clonedOutput; 
@@ -1744,111 +1709,6 @@ function saveMergeImageSeamless() {
         type: TYPE.ORIGIN,
         height: base.h,
         width: base.w,
-        parent: image_editing_data.layer[baseIndex].uuid,
     });
     fileUpdate();
-}
-
-
-/**
- * 拉普拉斯金字塔融合 (Laplacian Pyramid Blending)
- * @param {cv.Mat} fgMat 前景人像 (8UC3 或 8UC4)
- * @param {cv.Mat} bgMat 背景影像 (同尺寸)
- * @param {cv.Mat} maskMat 遮罩 (8UC1, 黑白)
- * @param {number} levels 金字塔層數 (建議 4-6)
- * @returns {cv.Mat} 融合後的影像 (8UC3)
- */
-function laplacianPyramidBlending(fgMat, bgMat, maskMat, levels) {
-    // --- 1. 預處理：轉換為浮點數 (CV_32F) 以確保計算精度 ---
-    let fg = new cv.Mat();
-    let bg = new cv.Mat();
-    let mask = new cv.Mat();
-    
-    fgMat.convertTo(fg, cv.CV_32FC3, 1/255.0);
-    bgMat.convertTo(bg, cv.CV_32FC3, 1/255.0);
-    maskMat.convertTo(mask, cv.CV_32FC3, 1/255.0); // 遮罩也轉成 float 以便做乘法
-
-    // --- 2. 建立高斯金字塔 (Gaussian Pyramids) ---
-    function buildGauss(src, lvls) {
-        let py = [src.clone()];
-        for (let i = 0; i < lvls; i++) {
-            let next = new cv.Mat();
-            cv.pyrDown(py[i], next);
-            py.push(next);
-        }
-        return py;
-    }
-
-    let gaussFG = buildGauss(fg, levels);
-    let gaussBG = buildGauss(bg, levels);
-    let gaussMask = buildGauss(mask, levels);
-
-    // --- 3. 建立拉普拉斯金字塔 (Laplacian Pyramids) ---
-    function buildLap(gaussPy, lvls) {
-        let py = [];
-        for (let i = 0; i < lvls; i++) {
-            let expanded = new cv.Mat();
-            // pyrUp 時傳入 dstSize 以應對長寬為奇數的情況
-            cv.pyrUp(gaussPy[i + 1], expanded, gaussPy[i].size());
-            let lap = new cv.Mat();
-            cv.subtract(gaussPy[i], expanded, lap);
-            py.push(lap);
-            expanded.delete();
-        }
-        py.push(gaussPy[lvls].clone()); // 最小的一層直接存入
-        return py;
-    }
-
-    let lapFG = buildLap(gaussFG, levels);
-    let lapBG = buildLap(gaussBG, levels);
-
-    // --- 4. 融合金字塔每一層 (Blending) ---
-    let blendedPyramid = [];
-    for (let i = 0; i <= levels; i++) {
-        let m = gaussMask[i];
-        let lFG = lapFG[i];
-        let lBG = lapBG[i];
-
-        // 計算: L_result = L_fg * Mask + L_bg * (1 - Mask)
-        let resFG = new cv.Mat();
-        let resBG = new cv.Mat();
-        let invMask = new cv.Mat(m.size(), m.type(), new cv.Scalar(1.0, 1.0, 1.0, 1.0));
-        cv.subtract(invMask, m, invMask);
-
-        cv.multiply(lFG, m, resFG);
-        cv.multiply(lBG, invMask, resBG);
-
-        let combined = new cv.Mat();
-        cv.add(resFG, resBG, combined);
-        blendedPyramid.push(combined);
-
-        // 釋放中間 Mat
-        resFG.delete(); resBG.delete(); invMask.delete();
-    }
-
-    // --- 5. 重建影像 (Reconstruction) ---
-    let result = blendedPyramid[levels].clone();
-    for (let i = levels - 1; i >= 0; i--) {
-        let up = new cv.Mat();
-        cv.pyrUp(result, up, blendedPyramid[i].size());
-        result.delete(); // 釋放舊的 result
-        result = new cv.Mat();
-        cv.add(up, blendedPyramid[i], result);
-        up.delete();
-    }
-
-    // --- 6. 收尾：轉回 8U 格式 ---
-    let finalOutput = new cv.Mat();
-    result.convertTo(finalOutput, cv.CV_8UC3, 255.0);
-
-    // --- 7. 大掃除：釋放所有金字塔佔用的記憶體 (非常重要！) ---
-    [fg, bg, mask, result].forEach(m => m.delete());
-    gaussFG.forEach(m => m.delete());
-    gaussBG.forEach(m => m.delete());
-    gaussMask.forEach(m => m.delete());
-    lapFG.forEach(m => m.delete());
-    lapBG.forEach(m => m.delete());
-    blendedPyramid.forEach(m => m.delete());
-
-    return finalOutput;
 }

@@ -24,7 +24,7 @@ float sigma = sigma_factor * 8 * 8;
 float two_sigma_sq = 2.0f * sigma * sigma;
 
 // Gradient 權重：強迫對齊紋理結構
-const int GRADIENT_WEIGHT = 5; 
+const int GRADIENT_WEIGHT = 10; 
 
 static unsigned int g_seed = 12345;
 inline int fast_rand() {
