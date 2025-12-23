@@ -209,6 +209,9 @@ function fileUpdate(){
                 <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'MergeSingle');" title="直接新增影像">合併影像(單獨)</span>
             </div>
             <div style="border: 2px solid black;padding: 3px;">
+                <span style="text-decoration: underline;cursor: pointer;color: blue;" onclick="setEditImage(imageList[${i}], 'Relight');" title="調整影像的光源">光源調整</span>
+            </div>
+            <div style="border: 2px solid black;padding: 3px;">
                 <span style="text-decoration: underline;cursor: pointer;color: green;" onclick="downloadMat(imageList[${i}]);">下載</span>
                 <span style="text-decoration: underline;cursor: pointer;color: red;" onclick="${(data.sibling)?"if(confirm('前景、遮罩、背景都會被刪除!\\n確認刪除?')){removeImageFromList("+i+");}":"if(confirm('確認刪除?')){removeImageFromList("+i+");}"}">刪除</span>
             </div>

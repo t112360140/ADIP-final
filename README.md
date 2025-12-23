@@ -13,3 +13,7 @@
 
 ### SeamlesClone
 - [影像融合](https://docs.opencv.org/4.x/df/da0/group__photo__clone.html)
+
+### Lambert(Half_Lambert)
+- [光源重建-1](https://zh.wikipedia.org/wiki/%E6%9C%97%E4%BC%AF%E4%BD%99%E5%BC%A6%E5%AE%9A%E5%BE%8B)
+- [光源重建-2](https://developer.valvesoftware.com/wiki/Half_Lambert)

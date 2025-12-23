@@ -86,7 +86,7 @@
                     <br>
                     <button onclick="mirrorMergeImage(image_editing_data.select, 0);">水平鏡像</button>
                     <button onclick="mirrorMergeImage(image_editing_data.select, 1);">垂直鏡像</button>
-                    旋轉:<input type="range" min="-180" max="180" value="0" oninput="
+                    旋轉:<input id="image-rotate" type="range" min="-180" max="180" value="0" oninput="
                             rotateMergeImage(image_editing_data.select, parseInt(this.value));
                         ">
                     <br>
@@ -104,7 +104,6 @@
                     ">轉移顏色</button>
                     <br>
                     <button onclick="resetMergeImage(image_editing_data.select);">重置圖片</button>
-                    <br>
                     <button onclick="saveMergeImage();">儲存影像</button>
                 </div>
                 <div id="PhotoFix-menu" style="display:none;">
@@ -112,6 +111,15 @@
                     <button onclick="fixImage();">修補影像</button>
                     <button onclick="fixImagePatchMatch();">修補影像(PM)</button>
                     <button onclick="saveFixImage();">儲存影像</button>
+                </div>
+                <div id="Relight-menu" style="display:none;">
+                    光源距離: <input id="relight-z" type="range" onchange="image_editing_data.z=parseFloat(this.value);updateRelightData();" min="10" max="200" value="100" step="0.1"><br>
+                    光源大小: <input id="relight-range" type="range" onchange="image_editing_data.range=parseFloat(this.value);updateRelightData();" min="10" max="1000" value="500" step="0.1"><br>
+                    強度: <input id="relight-intensity" type="range" onchange="image_editing_data.intensity=parseFloat(this.value);updateRelightData();" min="0" max="5" value="1" step="0.1"><br>
+                    陰影強度: <input id="relight-shadowIntensity" type="range" onchange="image_editing_data.shadowIntensity=parseFloat(this.value);updateRelightData();" min="0" max="5" value="1" step="0.1"><br>
+                    光滑度: <input id="relight-smooth" type="range" onchange="image_editing_data.smoothness=parseFloat(this.value);updateRelightData();" min="9" max="101" value="51" step="2"><br>
+                    Half Lambert: <input id="relight-half" type="checkbox" onchange="image_editing_data.half=this.checked;updateRelightData();">
+                    <button onclick="saveRelightImage();">儲存影像</button>
                 </div>
             </div>
             <div style="margin-bottom: 25px;">
