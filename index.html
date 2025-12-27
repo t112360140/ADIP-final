@@ -108,13 +108,13 @@
                             }
                         }
                     ">轉移顏色</button>
-                    <br><br>
+                    <br>
                     陰影: <input type="checkbox" id="shadow-enable" onchange="
                             if(this.checked){
                                 image_editing_data.shadow={
                                     angle:90,
                                     length:1,
-                                    decay:0,
+                                    decay:0.5,
                                 };
                             }else{
                                 image_editing_data.shadow=null;
@@ -126,7 +126,7 @@
                     <br>
                     陰影長度: <input type="range" id="shadow-length" oninput="if(image_editing_data.shadow){image_editing_data.shadow.length=parseFloat(this.value);drawMergeImage();}" min="0.1" max="10" value="0.5" step="0.1">
                     <br>
-                    陰影衰減: <input type="range" id="shadow-decay" oninput="if(image_editing_data.shadow){image_editing_data.shadow.decay=parseFloat(this.value);drawMergeImage();}" min="0" max="1" value="0" step="0.1">
+                    陰影衰減: <input type="range" id="shadow-decay" oninput="if(image_editing_data.shadow){image_editing_data.shadow.decay=parseFloat(this.value);drawMergeImage();}" min="0" max="1" value="0.5" step="0.1">
                     <br>
                     <button onclick="resetMergeImage(image_editing_data.select);">重置圖片</button>
                     <button onclick="saveMergeImage();">儲存影像</button>

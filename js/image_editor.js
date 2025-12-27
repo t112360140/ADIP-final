@@ -1009,12 +1009,12 @@ function drawMergeImage(isPreview = false) {
             }
 
             // ============================================================
-            //  [NEW] 實心無縫微條帶陰影 (Seamless Continuous Micro-Strip Shadow)
+            //  [NEW] 實心無縫微條帶陰影 (統計學接地判斷版)
             // ============================================================
             if (image_editing_data.shadow && !layerAdj.base) {
                 const shadowCfg = image_editing_data.shadow;
                 
-                const dsRatio = 0.25; 
+                const dsRatio = 0.5; 
                 
                 const rotRad = (layerAdj.rotate ?? 0) * Math.PI / 180;
                 const absCos = Math.abs(Math.cos(rotRad));
@@ -1059,43 +1059,77 @@ function drawMergeImage(isPreview = false) {
                 const imgData = sCtx.getImageData(0, 0, canvasW, canvasH);
                 const data = imgData.data;
 
-                // 1. 絕對底部偵測
-                let globalMaxY = 0; 
-                let globalMinY = canvasH;
-                
-                for (let i = 0; i < data.length; i += 16) {
-                    if (data[i+3] > 50) {
-                        const pixelIndex = i / 4;
-                        const py = Math.floor(pixelIndex / canvasW);
-                        if (py > globalMaxY) globalMaxY = py;
-                        if (py < globalMinY) globalMinY = py;
-                    }
-                }
-                
-                const objectHeight = globalMaxY - globalMinY;
-                const GROUND_TOLERANCE_RATIO = 0.3; 
-                const groundZoneY = globalMaxY - (objectHeight * GROUND_TOLERANCE_RATIO);
-
-                // 清空準備繪製
-                sCtx.clearRect(0, 0, canvasW, canvasH);
-                
-                // 設定填滿顏色與線條顏色
-                sCtx.fillStyle = '#000000';
-                sCtx.strokeStyle = '#000000';
-                // [核心修正] 線寬設為 2px，用來縫合每一個微條帶之間的縫隙
-                sCtx.lineWidth = 2; 
-                sCtx.lineJoin = 'round'; // 讓連接處圓滑
-                
+                // -------------------------------------------------------------
+                // [關鍵修改] 階段一：收集所有底部點進行統計分析
+                // -------------------------------------------------------------
                 const scanMargin = smallW; 
                 const scanStartX = Math.max(0, Math.floor(cX - scanMargin));
                 const scanEndX   = Math.min(canvasW, Math.floor(cX + scanMargin));
-                const bboxTop = cY - smallH / 2;
-                
-                const JUMP_THRESHOLD = 5;
 
+                let allFloorPoints = [];
+                let globalMaxY = 0;
+                let globalMinY = canvasH;
+
+                // Pass 1: 掃描取得資料
+                for (let sx = scanStartX; sx < scanEndX; sx++) {
+                    for (let sy = canvasH - 1; sy >= 0; sy--) {
+                        const idx = (sy * canvasW + sx) * 4;
+                        if (data[idx + 3] > 50) {
+                            allFloorPoints.push(sy);
+                            if (sy > globalMaxY) globalMaxY = sy;
+                            if (sy < globalMinY) globalMinY = sy;
+                            break; // 這一行找到底就換下一行
+                        }
+                    }
+                }
+
+                // 計算接地閾值 (Ground Threshold)
+                // 預設為全高
+                let groundZoneY = 0; 
+
+                if (allFloorPoints.length > 0) {
+                    const objHeight = globalMaxY - globalMinY;
+                    
+                    // 1. 初步過濾：只取下半部的點作為「接地候選群」
+                    // 這是為了避免「飛在空中的腿」嚴重拉低平均值
+                    const candidateCutoff = globalMaxY - (objHeight * 0.5); 
+                    const candidates = allFloorPoints.filter(y => y > candidateCutoff);
+
+                    if (candidates.length > 0) {
+                        // 2. 計算平均值 (Mean)
+                        const sum = candidates.reduce((a, b) => a + b, 0);
+                        const mean = sum / candidates.length;
+
+                        // 3. 計算標準差 (Standard Deviation)
+                        const squaredDiffs = candidates.map(val => Math.pow(val - mean, 2));
+                        const avgSquaredDiff = squaredDiffs.reduce((a, b) => a + b, 0) / candidates.length;
+                        const stdDev = Math.sqrt(avgSquaredDiff);
+
+                        // 4. 設定閾值：平均值往上 2.5 個標準差
+                        // Y軸向下是變大，所以「往上」是減去
+                        // 2.5 sigma 通常能涵蓋 98% 的常態分佈，能有效保留傾斜的鞋底，同時切斷懸空物
+                        groundZoneY = mean - (2.5 * stdDev);
+                        
+                        // console.log(`Ground Stats -> MaxY: ${globalMaxY}, Mean: ${mean.toFixed(1)}, SD: ${stdDev.toFixed(1)}, Limit: ${groundZoneY.toFixed(1)}`);
+                    } else {
+                        // 如果沒有候選點，回退到舊算法
+                        groundZoneY = globalMaxY - (objHeight * 0.25);
+                    }
+                }
+                // -------------------------------------------------------------
+
+                // 清空準備繪製
+                sCtx.clearRect(0, 0, canvasW, canvasH);
+                sCtx.fillStyle = '#000000';
+                sCtx.strokeStyle = '#000000';
+                sCtx.lineWidth = 2; 
+                sCtx.lineJoin = 'round';
+                
+                const bboxTop = cY - smallH / 2;
+                const JUMP_THRESHOLD = 5;
                 let prevScan = null; 
 
-                // 逐像素掃描
+                // Pass 2: 繪圖
                 for (let sx = scanStartX; sx < scanEndX; sx++) {
                     let floorY = -1;
                     let ceilY = -1;
@@ -1110,13 +1144,14 @@ function drawMergeImage(isPreview = false) {
                     }
 
                     if (floorY !== -1) {
-                        // 2. 接地過濾
+                        // 2. 統計學接地過濾 (Statistical Ground Filter)
+                        // 使用剛剛算出來的動態閾值
                         if (floorY < groundZoneY) {
                             prevScan = null; 
                             continue;
                         }
 
-                        // 3. 找視覺頂部 (計算厚度)
+                        // 3. 找視覺頂部
                         ceilY = floorY;
                         for (let sy = floorY; sy >= 0; sy--) {
                              const idx = (sy * canvasW + sx) * 4;
@@ -1152,9 +1187,6 @@ function drawMergeImage(isPreview = false) {
                                     sCtx.lineTo(currTipX, currTipY);
                                     sCtx.lineTo(prevScan.tipX, prevScan.tipY);
                                     sCtx.closePath();
-                                    
-                                    // [關鍵修正] 先 Fill 再 Stroke
-                                    // Fill 負責填滿主體，Stroke 負責向外擴張一點點，把縫隙蓋住
                                     sCtx.fill(); 
                                     sCtx.stroke(); 
                                 }
@@ -1603,6 +1635,108 @@ function robustWhitePatchWhiteBalance(src) {
 function colorMatch(refIndex, targetIndex) {
     let refSrc = image_editing_data.layer[refIndex].image;
     let tgtSrc = image_editing_data.layer[targetIndex].image;
+
+    // 轉換到 Lab 空間
+    let refLab = new cv.Mat();
+    cv.cvtColor(refSrc, refLab, cv.COLOR_RGBA2RGB);
+    cv.cvtColor(refLab, refLab, cv.COLOR_RGB2Lab);
+    
+    // 使用你原本處理目標圖層 Alpha 的方式
+    let {rgb: tgtLab, alpha: tgtAlpha} = RGBA2RGB(tgtSrc);
+    cv.cvtColor(tgtLab, tgtLab, cv.COLOR_RGB2Lab);
+
+    let refChannels = new cv.MatVector();
+    let tgtChannels = new cv.MatVector();
+    cv.split(refLab, refChannels);
+    cv.split(tgtLab, tgtChannels);
+
+    /**
+     * 改良版遮罩：結合亮度過濾與邊緣檢測 (Gray Edge 思路)
+     */
+    function createEdgeEnhancedMask(labMat) {
+        let channels = new cv.MatVector();
+        cv.split(labMat, channels);
+        let L = channels.get(0); // 亮度通道
+        
+        // 1. 亮度過濾 (排除極端值)
+        let rangeMask = new cv.Mat();
+        cv.inRange(L, new cv.Mat(1, 1, cv.CV_8U, [40, 0, 0, 0]), new cv.Mat(1, 1, cv.CV_8U, [220, 0, 0, 0]), rangeMask);
+
+        // 2. 邊緣檢測 (Sobel)
+        let gradX = new cv.Mat();
+        let gradY = new cv.Mat();
+        let gradAbs = new cv.Mat();
+        cv.Sobel(L, gradX, cv.CV_16S, 1, 0, 3); // X 方向梯度
+        cv.Sobel(L, gradY, cv.CV_16S, 0, 1, 3); // Y 方向梯度
+        cv.convertScaleAbs(gradX, gradX);
+        cv.convertScaleAbs(gradY, gradY);
+        cv.addWeighted(gradX, 0.5, gradY, 0.5, 0, gradAbs); // 合併梯度
+
+        // 3. 取得高梯度區域 (排除平滑的大色塊)
+        let edgeMask = new cv.Mat();
+        // 門檻值 20-40 之間可調整，越大代表越只看「細節」
+        cv.threshold(gradAbs, edgeMask, 30, 255, cv.THRESH_BINARY);
+
+        // 4. 合併遮罩：又是中間亮度，又是邊緣
+        let finalMask = new cv.Mat();
+        cv.bitwise_and(rangeMask, edgeMask, finalMask);
+
+        // 清理暫存
+        channels.delete(); L.delete(); rangeMask.delete(); 
+        gradX.delete(); gradY.delete(); gradAbs.delete(); edgeMask.delete();
+        
+        return finalMask;
+    }
+
+    let refMask = createEdgeEnhancedMask(refLab);
+    let tgtMask = createEdgeEnhancedMask(tgtLab);
+
+    // 檢查遮罩是否太稀疏 (如果圖太糊沒邊緣，則退回用亮度遮罩)
+    if (cv.countNonZero(refMask) < 100 || cv.countNonZero(tgtMask) < 100) {
+        // ...這裡可以寫退路邏輯，或者調低 threshold...
+    }
+
+    let mRef = new cv.Mat();
+    let sRef = new cv.Mat();
+    let mTgt = new cv.Mat();
+    let sTgt = new cv.Mat();
+
+    for (let i = 0; i < 3; i++) {
+        let rChan = refChannels.get(i);
+        let tChan = tgtChannels.get(i);
+
+        cv.meanStdDev(rChan, mRef, sRef, refMask);
+        cv.meanStdDev(tChan, mTgt, sTgt, tgtMask);
+
+        let muRef = mRef.doubleAt(0);
+        let sigmaRef = sRef.doubleAt(0);
+        let muTgt = mTgt.doubleAt(0);
+        let sigmaTgt = sTgt.doubleAt(0);
+
+        let alpha = sigmaRef / (sigmaTgt || 0.001);
+        let beta = muRef - (muTgt * alpha);
+        
+        tChan.convertTo(tChan, -1, alpha, beta);
+    }
+
+    // 合併與還原
+    cv.merge(tgtChannels, tgtLab);
+    cv.cvtColor(tgtLab, tgtLab, cv.COLOR_Lab2RGB);
+    
+    image_editing_data.layer[targetIndex].image = RGB2RGBA(tgtLab, tgtAlpha);
+
+    // 清理所有記憶體
+    refLab.delete(); refChannels.delete(); tgtChannels.delete();
+    refMask.delete(); tgtMask.delete();
+    mRef.delete(); sRef.delete(); mTgt.delete(); sTgt.delete();
+
+    drawMergeImage();
+}
+
+
+function colorMatch_v2(refIndex, targetIndex) {
+    let refSrc = image_editing_data.layer[refIndex].image;
+    let tgtSrc = image_editing_data.layer[targetIndex].image;
     let refLab = new cv.Mat();
     cv.cvtColor(refSrc, refLab, cv.COLOR_RGBA2RGB);
     cv.cvtColor(refLab, refLab, cv.COLOR_RGB2Lab);
@@ -1642,30 +1776,51 @@ function colorMatch(refIndex, targetIndex) {
     let refMask = createEdgeEnhancedMask(refLab);
     let tgtMask = createEdgeEnhancedMask(tgtLab);
 
-    let mRef = new cv.Mat();
+        let mRef = new cv.Mat();
     let sRef = new cv.Mat();
     let mTgt = new cv.Mat();
     let sTgt = new cv.Mat();
 
-    // 1. 先計算參考圖色彩複雜度 (利用 a, b 通道的標準差)
+    // 1. 計算參考圖的 Mean (均值) 與 Std (標準差)
+    // Lab 色彩空間中，a 和 b 代表顏色分量 (0 為無色/灰)
+    
     cv.meanStdDev(refChannels.get(1), mRef, sRef, refMask); // a channel
+    let muA = mRef.doubleAt(0); // 取出平均值
     let stdA = sRef.doubleAt(0);
+    
     cv.meanStdDev(refChannels.get(2), mRef, sRef, refMask); // b channel
+    let muB = mRef.doubleAt(0); // 取出平均值
     let stdB = sRef.doubleAt(0);
     
-    // 色彩複雜度：a, b 標準差的平均值
-    // 老照片通常 std < 5, 鮮豔照片 std > 20
+    // --- 原始邏輯：色彩複雜度 ---
     let colorComplexity = (stdA + stdB) / 2;
+
+    // --- 新增邏輯：色彩飽和度 (強度) ---
+    // 計算參考圖整體的平均飽和度 (距離原點的距離)
+    let colorSaturation = Math.sqrt(muA * muA + muB * muB);
 
     /**
      * 計算混合權重 (trustFactor)
-     * 如果 complexity <= 5 (老照片): trustFactor = 1.0 (完全轉換)
-     * 如果 complexity >= 30 (超鮮豔): trustFactor = 0.2 (保留原始大部分顏色)
+     * 1. 基礎權重：基於複雜度 (越簡單通常代表風格越強，權重越高)
      */
     let trustFactor = 1.0 - ((colorComplexity - 5) / (30 - 5));
-    trustFactor = Math.max(0.2, Math.min(1.0, trustFactor)); // 限制在 0.2 ~ 1.0 之間
+    trustFactor = Math.max(0.2, Math.min(1.0, trustFactor)); 
 
-    console.log(`色彩複雜度: ${colorComplexity.toFixed(2)}, 轉換強度: ${trustFactor.toFixed(2)}`);
+    /**
+     * 2. 修正權重：防止「單純色塊」造成過度染色
+     * 判斷條件：如果色彩分佈很集中 (complexity < 10)，但平均顏色很鮮豔 (saturation > 20)
+     * 這通常代表參考圖是「藍天」、「綠幕」或「紅牆」，而不是「濾鏡風格」。
+     */
+    if (colorComplexity < 15 && colorSaturation > 25) {
+        console.log(`偵測到單純背景色塊 (Sat: ${colorSaturation.toFixed(2)})，降低轉換強度。`);
+        // 強制降低權重，或是根據飽和度動態衰減
+        trustFactor *= 0.4; 
+    }
+
+    // 確保最終權重仍在合理範圍
+    trustFactor = Math.max(0.1, Math.min(1.0, trustFactor));
+
+    console.log(`複雜度: ${colorComplexity.toFixed(2)}, 飽和度: ${colorSaturation.toFixed(2)}, 最終強度: ${trustFactor.toFixed(2)}`);
 
     for (let i = 0; i < 3; i++) {
         let rChan = refChannels.get(i);
