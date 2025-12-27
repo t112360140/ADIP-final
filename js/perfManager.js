@@ -65,8 +65,10 @@ function newPerf(name='APPLE', detail=""){
                         break;
                     }
                 }
-                if(perf_board&&perf_list.length<=0)
+                if(perf_board&&perf_list.length<=0){
                     perf_board.style.display='none';
+                    perf_board_clear_button.style.display='none';
+                }
                 this.element=null;
             },
         }
@@ -74,6 +76,7 @@ function newPerf(name='APPLE', detail=""){
         perf_list.push(data);
 
         perf_board.style.display='block';
+        perf_board_clear_button.style.display='flex';
         div.scrollIntoView({behavior:'smooth', block:'center'});
         return data;
     }

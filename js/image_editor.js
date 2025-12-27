@@ -714,6 +714,7 @@ function saveGrabCut(){
                     perf.stop();
                 });
             }else{
+                const perf=newPerf('FixImage', `對 ${image_editing_data.img.name} 執行 cv.inpaint`);
                 let {rgb: outputBackRGB, alpha} = RGBA2RGB(outputBack);
                 const kernelSize = 5;
                 let kernel = cv.Mat.ones(kernelSize, kernelSize, cv.CV_8U);
@@ -742,6 +743,7 @@ function saveGrabCut(){
                     parent: image_editing_data.img.uuid,
                     sibling: uuid_,
                 });
+                perf.stop();
             }
 
             resizeMask.delete();
@@ -2156,4 +2158,101 @@ function saveRelightImage(){
         width: image_editing_data.img.width,
     });
     fileUpdate();
+}
+
+
+
+function applyColorHarmonization(targetIndex, refIndex, strength = 0.8) {
+    let matsToProcess = [];
+    const track = (mat) => { matsToProcess.push(mat); return mat; };
+
+    try {
+        const tgtData = image_editing_data.layer[targetIndex];
+        const refData = image_editing_data.layer[refIndex];
+
+        // 1. 尋找最原始的圖片 Mat (防止色彩重複疊加導致崩壞)
+        // 從 imageList 中根據 UUID 找回最初沒被改過顏色的圖
+        let originalSource = imageList.find(img => img.uuid === tgtData.uuid);
+        if (!originalSource) {
+            console.error("找不到原始圖片資源");
+            return;
+        }
+
+        // 2. 準備前景 (始終使用原始圖為基底)
+        let sourceMat = originalSource.image.mat_clone(); 
+        let {rgb: srcRGB, alpha: srcAlpha} = RGBA2RGB(sourceMat);
+        
+        let srcLab = track(new cv.Mat());
+        cv.cvtColor(srcRGB, srcLab, cv.COLOR_RGB2Lab);
+        
+        // 3. 準備背景 (參考圖)
+        let refRGB = track(new cv.Mat());
+        cv.cvtColor(refData.image, refRGB, cv.COLOR_RGBA2RGB);
+        let refLab = track(new cv.Mat());
+        cv.cvtColor(refRGB, refLab, cv.COLOR_RGB2Lab);
+
+        // 4. 計算統計量
+        let mSrc = track(new cv.Mat()), sSrc = track(new cv.Mat());
+        let mRef = track(new cv.Mat()), sRef = track(new cv.Mat());
+        cv.meanStdDev(srcLab, mSrc, sSrc, srcAlpha); 
+        cv.meanStdDev(refLab, mRef, sRef);
+
+        let srcChannels = track(new cv.MatVector());
+        cv.split(srcLab, srcChannels);
+
+        // 5. 執行轉換公式 (Reinhard)
+        for (let i = 0; i < 3; i++) {
+            let chan = track(srcChannels.get(i));
+            let muS = mSrc.doubleAt(i);
+            let sigmaS = sSrc.doubleAt(i) || 0.001;
+            let muR = mRef.doubleAt(i);
+            let sigmaR = sRef.doubleAt(i) || 0.001;
+
+            let ratio = sigmaR / sigmaS;
+            let shift = muR - (muS * ratio);
+
+            // 當前的變色係數
+            let finalRatio = ratio * strength + (1.0 - strength);
+            let finalShift = shift * strength;
+
+            chan.convertTo(chan, -1, finalRatio, finalShift);
+        }
+
+        // 6. 合併並更新到目前的 layer
+        cv.merge(srcChannels, srcLab);
+        cv.cvtColor(srcLab, srcRGB, cv.COLOR_Lab2RGB);
+        
+        if (tgtData.image) tgtData.image.delete(); 
+        tgtData.image = RGB2RGBA(srcRGB, srcAlpha);
+
+        // 即時更新畫面 (isPreview 設為 true 可提升流暢度)
+        drawMergeImage(true); 
+    } catch (err) {
+        console.error("色調預覽發生錯誤:", err);
+    } finally{
+        matsToProcess.forEach(m => m.delete());
+    }
+}
+
+function handleHarmonization() {
+    const strengthInput = document.getElementById('harm-strength');
+    if(!strengthInput) return;
+    
+    const strength = strengthInput.value / 100.0;
+    
+    // 更新數值文字顯示 (可選)
+    if(document.getElementById('strength-val')) {
+        document.getElementById('strength-val').innerText = strengthInput.value + "%";
+    }
+
+    const selected = image_editing_data.select;
+    let baseIndex = -1;
+    if (image_editing_data.adjust) {
+        baseIndex = image_editing_data.adjust.findIndex(a => a.base);
+    }
+
+    if (selected >= 0 && baseIndex >= 0 && selected !== baseIndex) {
+        // 觸發即時計算
+        applyColorHarmonization(selected, baseIndex, strength);
+    }
 }

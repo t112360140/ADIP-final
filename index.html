@@ -110,6 +110,10 @@
                         }
                     ">轉移顏色</button>
                     <br>
+                    手動轉移顏色: <input type="range" id="harm-strength" min="0" max="100" value="80" 
+                            oninput="handleHarmonization()" style="vertical-align: middle;">
+                        <span id="strength-val">80%</span>
+                    <br>
                     陰影: <input type="checkbox" id="shadow-enable" onchange="
                             if(this.checked){
                                 image_editing_data.shadow={
