@@ -542,6 +542,7 @@ async function doGrabCutWithFace(){
 
 function doGrabCut(rect, iterCount=2){
     if(image_editing_data.img){
+        const perf=newPerf('GrabCut', `對 ${image_editing_data.img.name} 執行 GrabCut`);
         let src=image_editing_data.img.image.mat_clone();
 
         let mode=cv.GC_INIT_WITH_RECT;
@@ -616,6 +617,8 @@ function doGrabCut(rect, iterCount=2){
         src.delete();
         output.delete();
         outputMask.delete();
+
+        perf.stop();
     }
 }
 
@@ -686,6 +689,7 @@ function saveGrabCut(){
         if((image_editing_data.img.type==TYPE.ORIGIN||image_editing_data.img.type==TYPE.FIXED) && confirm('是否要修補背景?')){
             if(confirm('使用PatchMatch修補?\n選擇"否"將使用OpenCV進行修補。')){
                 let task=newTask("圖像修復", `任務UUID: ${uuid_}`, null);
+                const perf=newPerf("PatchMatch", `對 ${image_editing_data.img.name} 執行 PatchMatch`);
                 let back_data=imageClone(image_editing_data);
                 buildInpaintTask(cv, back_data.img.image, resizeMask, PM_iters).then((data)=>{
                     imageList.push({
@@ -707,6 +711,7 @@ function saveGrabCut(){
                     task=null;
                 }).finally(()=>{
                     deepImageRemove(back_data);
+                    perf.stop();
                 });
             }else{
                 let {rgb: outputBackRGB, alpha} = RGBA2RGB(outputBack);
@@ -781,6 +786,8 @@ function saveGrabCut(){
 
 function fixImage(){
     if(image_editing_data.mode%10==3){
+        const perf=newPerf('FixImage', `對 ${image_editing_data.img.name} 執行 cv.inpaint`);
+
         let {rgb, alpha} = RGBA2RGB(image_editing_data.img.image);
         const kernelSize = 3;
         const inpaintRadius = 3;
@@ -806,6 +813,8 @@ function fixImage(){
         cv.imshow(image_editor_canvas, image_editing_data.img.image);
         const ctx=image_editor_mask_canvas.getContext('2d');
         ctx.clearRect(0, 0, image_editor_mask_canvas.width, image_editor_mask_canvas.height);
+
+        perf.stop();
     }
 }
 
@@ -814,6 +823,7 @@ function fixImagePatchMatch(){
 
         let back_data=imageClone(image_editing_data);
         let task=newTask("圖像修復", `任務UUID: ${back_data.img.uuid}`, null);
+        const perf=newPerf("PatchMatch", `對 ${back_data.img.name} 執行 PatchMatch`);
         buildInpaintTask(cv, back_data.img.image, image_editing_data.mask, PM_iters).then((data)=>{
             image_editing_data.img.image.delete();
             image_editing_data.img.image=data;
@@ -838,6 +848,7 @@ function fixImagePatchMatch(){
             task=null;
         }).finally(()=>{
             deepImageRemove(back_data);
+            perf.stop();
         });
     }
 }
@@ -1426,7 +1437,9 @@ function resetMergeImage(index){
 function applyGrayWorldWhiteBalance(index) {
     if(!(image_editing_data.layer&&0<=index&&index<image_editing_data.layer.length)) return;
 
+    const perf=newPerf('WhiteBalance', `對 ${image_editing_data.layer[index].name} 執行 白平衡(灰色世界)`);
     let  result=grayWorldWhiteBalance(image_editing_data.layer[index].image);
+    perf.stop();
     image_editing_data.layer[index].image.delete();
     image_editing_data.layer[index].image=result;
 
@@ -1467,7 +1480,9 @@ function grayWorldWhiteBalance(src){
 function applyGrayEdgeWhiteBalance(index) {
     if(!(image_editing_data.layer&&0<=index&&index<image_editing_data.layer.length)) return;
 
+    const perf=newPerf('WhiteBalance', `對 ${image_editing_data.layer[index].name} 執行 白平衡(灰色邊緣)`);
     let  result=grayEdgeWhiteBalance(image_editing_data.layer[index].image);
+    perf.stop();
     image_editing_data.layer[index].image.delete();
     image_editing_data.layer[index].image=result;
 
@@ -1546,7 +1561,9 @@ function grayEdgeWhiteBalance(src) {
 
 function applyRobustWhitePatchWhiteBalance(index, iterations = 2) {
     if(!(image_editing_data.layer&&0<=index&&index<image_editing_data.layer.length)) return;
+    const perf=newPerf('WhiteBalance', `對 ${image_editing_data.layer[index].name} 執行 白平衡(白斑)`);
     let  result=robustWhitePatchWhiteBalance(image_editing_data.layer[index].image);
+    perf.stop();
     image_editing_data.layer[index].image.delete();
     image_editing_data.layer[index].image=result;
 
@@ -1554,6 +1571,7 @@ function applyRobustWhitePatchWhiteBalance(index, iterations = 2) {
 }
 
 function robustWhitePatchWhiteBalance(src) {
+
     let matsToProcess = [];
     const track = (mat) => { matsToProcess.push(mat); return mat; };
 
@@ -1635,6 +1653,8 @@ function robustWhitePatchWhiteBalance(src) {
 function colorMatch(refIndex, targetIndex) {
     let refSrc = image_editing_data.layer[refIndex].image;
     let tgtSrc = image_editing_data.layer[targetIndex].image;
+    
+    const perf=newPerf('ColorMatch', `對 ${image_editing_data.layer[refIndex].name}->${image_editing_data.layer[targetIndex].name} 執行 色彩轉移`);
 
     // 轉換到 Lab 空間
     let refLab = new cv.Mat();
@@ -1729,6 +1749,8 @@ function colorMatch(refIndex, targetIndex) {
     refLab.delete(); refChannels.delete(); tgtChannels.delete();
     refMask.delete(); tgtMask.delete();
     mRef.delete(); sRef.delete(); mTgt.delete(); sTgt.delete();
+
+    perf.stop();
 
     drawMergeImage();
 }
@@ -1978,6 +2000,7 @@ function saveMergeImageSeamless() {
 let relighting=false
 function relightImage(src, lightPos, intensity = 0.5, shadowIntensity = 0.5, range = 500, smoothness = 35, half = false) {
     if(relighting) return;
+
     relighting=true;
     let matsToProcess = [];
     const track = (mat) => { matsToProcess.push(mat); return mat; };
@@ -2110,7 +2133,9 @@ function updateRelightData(relight=true){
         y:image_editing_data.y,
         z:image_editing_data.z,
     }
+    const perf=newPerf('Relight', `執行 重新打光`);
     let output=relightImage(image_editing_data.img.image, light, image_editing_data.intensity, image_editing_data.shadowIntensity, image_editing_data.range, image_editing_data.smoothness, image_editing_data.half);
+    perf.stop();
     if(output){
         cv.imshow(image_editor_canvas, output);
         output.delete();
