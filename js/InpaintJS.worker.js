@@ -10,7 +10,7 @@ self.onmessage = function(event) {
         return;
     }
 
-    const { command, uuid, data } = event.data;
+    const { command, uuid, data, iters } = event.data;
 
     if (command === 'inpaint') {
         try {
@@ -28,7 +28,9 @@ self.onmessage = function(event) {
             cv.dilate(maskImage, tempMask, kernel);
             kernel.delete();
 
-            const resultRGBA = cv.image_complete_js(srcImage, tempMask, 10, 8, 8);  // user_iterations_unused, user_pm_iters, user_patch_w
+            let startTime=new Date().getTime();
+            const resultRGBA = cv.image_complete_js(srcImage, tempMask, iters??8, 8);  // user_pm_iters, user_patch_w
+            console.log(`PatchMatch takes ${new Date().getTime()-startTime}ms`);
 
             let maskInv = new cv.Mat();
             cv.bitwise_not(maskImage, maskInv);

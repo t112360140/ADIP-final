@@ -95,13 +95,38 @@
                     <button onclick="applyRobustWhitePatchWhiteBalance(image_editing_data.select);">白平衡(白斑)</button>
                     <button onclick="
                         if(0<=image_editing_data.select&&image_editing_data.select<image_editing_data.layer.length){
-                            let ret=parseInt(prompt(`請選擇轉移來源:\n${image_editing_data.layer.filter((v, i)=>(i!=image_editing_data.select)).map((v, i)=>((i+1).toString()+': '+v.name)).join('\n')}`))-1;
-                            if(0<=ret&&ret<image_editing_data.layer.length-1){
-                                ret=ret<image_editing_data.select?ret:ret+1;
-                                colorMatch(ret, image_editing_data.select);
+                            if(image_editing_data.layer.length<=1){
+                                alert('找不到其他來源!');
+                            }else if(image_editing_data.layer.length<=2){
+                                colorMatch((image_editing_data.select+1)%2, image_editing_data.select);
+                            }else{
+                                let ret=parseInt(prompt(`請選擇轉移來源:\n${image_editing_data.layer.filter((v, i)=>(i!=image_editing_data.select)).map((v, i)=>((i+1).toString()+': '+v.name)).join('\n')}`))-1;
+                                if(0<=ret&&ret<image_editing_data.layer.length-1){
+                                    ret=ret<image_editing_data.select?ret:ret+1;
+                                    colorMatch(ret, image_editing_data.select);
+                                }
                             }
                         }
                     ">轉移顏色</button>
+                    <br><br>
+                    陰影: <input type="checkbox" id="shadow-enable" onchange="
+                            if(this.checked){
+                                image_editing_data.shadow={
+                                    angle:90,
+                                    length:1,
+                                    decay:0,
+                                };
+                            }else{
+                                image_editing_data.shadow=null;
+                            }
+                            drawMergeImage();
+                        ">
+                    <br>
+                    陰影角度: <input type="range" id="shadow-angle" oninput="if(image_editing_data.shadow){image_editing_data.shadow.angle=(parseFloat(this.value)+450)%360;drawMergeImage();}" min="-180" max="180" value="0">
+                    <br>
+                    陰影長度: <input type="range" id="shadow-length" oninput="if(image_editing_data.shadow){image_editing_data.shadow.length=parseFloat(this.value);drawMergeImage();}" min="0.1" max="10" value="0.5" step="0.1">
+                    <br>
+                    陰影衰減: <input type="range" id="shadow-decay" oninput="if(image_editing_data.shadow){image_editing_data.shadow.decay=parseFloat(this.value);drawMergeImage();}" min="0" max="1" value="0" step="0.1">
                     <br>
                     <button onclick="resetMergeImage(image_editing_data.select);">重置圖片</button>
                     <button onclick="saveMergeImage();">儲存影像</button>

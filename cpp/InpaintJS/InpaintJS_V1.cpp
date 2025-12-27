@@ -17,6 +17,8 @@ int patch_w = 8;
 int pm_iters = 5;
 const int rs_max = INT_MAX; 
 
+const int FEATURE_CHANNELS = 7; 
+
 // Sigma 調整: 
 // 為了避免色塊，我們使用較小的基數，配合 Gradient Weight
 float sigma_factor = 2.0f; // 可以嘗試 1.5 ~ 5.0
@@ -24,7 +26,7 @@ float sigma = sigma_factor * 8 * 8;
 float two_sigma_sq = 2.0f * sigma * sigma;
 
 // Gradient 權重：強迫對齊紋理結構
-const int GRADIENT_WEIGHT = 10; 
+const int GRADIENT_WEIGHT = 2;
 
 static unsigned int g_seed = 12345;
 inline int fast_rand() {
@@ -116,23 +118,31 @@ inline void getRandomValidPoint(int& x, int& y) {
 // Core Logic
 // ------------------------------------------------------------------
 
-void calcGradient(const Mat& src, Mat& gradX, Mat& gradY) {
+void calcGradient(const Mat& src, Mat& gradX, Mat& gradY, Mat& grad45, Mat& grad135) {
     Mat gray;
     if (src.channels() == 3) cvtColor(src, gray, COLOR_BGR2GRAY);
     else gray = src.clone();
 
+    // 初始化所有梯度圖
     gradX.create(src.size(), CV_8UC1);
     gradY.create(src.size(), CV_8UC1);
-    
+    grad45.create(src.size(), CV_8UC1);
+    grad135.create(src.size(), CV_8UC1);
+
+    // 預設填入 128 (中性灰)，避免邊界未處理區域有雜訊
+    gradX.setTo(Scalar(128));
+    gradY.setTo(Scalar(128));
+    grad45.setTo(Scalar(128));
+    grad135.setTo(Scalar(128));
+
+    // 計算 X, Y (原本的邏輯)
     for (int y = 0; y < src.rows; ++y) {
         const uchar* ptr = gray.ptr<uchar>(y);
         uchar* gx = gradX.ptr<uchar>(y);
         for (int x = 1; x < src.cols - 1; ++x) {
             gx[x] = (uchar)((ptr[x + 1] - ptr[x - 1]) / 2 + 128);
         }
-        gx[0] = 128; gx[src.cols-1] = 128;
     }
-
     for (int y = 1; y < src.rows - 1; ++y) {
         const uchar* ptr_prev = gray.ptr<uchar>(y - 1);
         const uchar* ptr_next = gray.ptr<uchar>(y + 1);
@@ -141,16 +151,34 @@ void calcGradient(const Mat& src, Mat& gradX, Mat& gradY) {
             gy[x] = (uchar)((ptr_next[x] - ptr_prev[x]) / 2 + 128);
         }
     }
-    gradY.row(0).setTo(Scalar(128));
-    gradY.row(src.rows-1).setTo(Scalar(128));
+
+    // --- 新增：計算斜向梯度 ---
+    // 注意邊界：從 (1,1) 到 (rows-1, cols-1)
+    for (int y = 1; y < src.rows - 1; ++y) {
+        const uchar* ptr_prev = gray.ptr<uchar>(y - 1); // 上一行
+        const uchar* ptr_next = gray.ptr<uchar>(y + 1); // 下一行
+        
+        uchar* g45 = grad45.ptr<uchar>(y);
+        uchar* g135 = grad135.ptr<uchar>(y);
+
+        for (int x = 1; x < src.cols - 1; ++x) {
+            // 45度: 右下(x+1, y+1) - 左上(x-1, y-1)
+            g45[x] = (uchar)((ptr_next[x + 1] - ptr_prev[x - 1]) / 2 + 128);
+
+            // 135度: 左下(x-1, y+1) - 右上(x+1, y-1)
+            g135[x] = (uchar)((ptr_next[x - 1] - ptr_prev[x + 1]) / 2 + 128);
+        }
+    }
 }
 
-void createFeatureMap(const Mat& src, const Mat& gX, const Mat& gY, Mat& dst) {
+void createFeatureMap(const Mat& src, const Mat& gX, const Mat& gY, const Mat& g45, const Mat& g135, Mat& dst) {
     vector<Mat> channels;
-    split(src, channels); 
+    split(src, channels); // R, G, B
     channels.push_back(gX); 
     channels.push_back(gY); 
-    merge(channels, dst); 
+    channels.push_back(g45);  // 新增通道 5
+    channels.push_back(g135); // 新增通道 6
+    merge(channels, dst);     // 總共 7 通道
 }
 
 inline int dist(const Mat& a, const Mat& b, int ax, int ay, int bx, int by, int cutoff = INT_MAX) {
@@ -159,8 +187,9 @@ inline int dist(const Mat& a, const Mat& b, int ax, int ay, int bx, int by, int 
     const uchar* ptr_a = a.ptr<uchar>(ay);
     const uchar* ptr_b = b.ptr<uchar>(by);
     
-    int idx_a = ax * 5; 
-    int idx_b = bx * 5;
+    // 修改這裡：乘以 7
+    int idx_a = ax * FEATURE_CHANNELS; 
+    int idx_b = bx * FEATURE_CHANNELS;
 
     int ans = 0;
 
@@ -169,21 +198,29 @@ inline int dist(const Mat& a, const Mat& b, int ax, int ay, int bx, int by, int 
         const uchar* row_b = ptr_b + idx_b;
 
         for (int dx = 0; dx < patch_w; dx++) {
-            // RGB
+            // RGB (0, 1, 2)
             int d0 = (int)row_a[0] - (int)row_b[0]; 
             int d1 = (int)row_a[1] - (int)row_b[1]; 
             int d2 = (int)row_a[2] - (int)row_b[2]; 
             int c_dist = d0*d0 + d1*d1 + d2*d2;
 
-            // Gradient (Weighted)
+            // Gradient X, Y (3, 4)
             int d3 = (int)row_a[3] - (int)row_b[3]; 
             int d4 = (int)row_a[4] - (int)row_b[4]; 
-            int g_dist = (d3*d3 + d4*d4) * GRADIENT_WEIGHT;
+            
+            // --- 新增：Gradient 45, 135 (5, 6) ---
+            int d5 = (int)row_a[5] - (int)row_b[5]; 
+            int d6 = (int)row_a[6] - (int)row_b[6]; 
+
+            // 將所有梯度加總並乘上權重
+            // 注意：現在有 4 個梯度值，權重影響力變大了，可能需要微調 GRADIENT_WEIGHT
+            int g_dist = (d3*d3 + d4*d4 + d5*d5 + d6*d6) * GRADIENT_WEIGHT;
 
             ans += c_dist + g_dist;
             if (ans >= cutoff) return cutoff;
 
-            row_a += 5; row_b += 5;
+            row_a += FEATURE_CHANNELS; 
+            row_b += FEATURE_CHANNELS;
         }
         ptr_a += step_a; ptr_b += step_b;
     }
@@ -330,7 +367,7 @@ void upsampleNNF(const NNF& src_ann, NNF& dst_ann, int new_w, int new_h) {
     }
 }
 
-Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations_unused, int user_pm_iters, int user_patch_w) {
+Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_pm_iters, int user_patch_w) {
     patch_w = user_patch_w > 0 ? user_patch_w : 8; // 建議設為 16
     pm_iters = user_pm_iters > 0 ? user_pm_iters : 10;
     
@@ -355,7 +392,7 @@ Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations_unused, i
     NNF current_ann;
     vector<int> current_annd;
     Mat resize_img, resize_mask;
-    Mat gradX, gradY, feature_img, feature_B;
+    Mat gradX, gradY, grad45, grad135, feature_img, feature_B;
 
     for (int logscale = startscale; logscale <= 0; logscale++) {
         double scale = pow(2, logscale);
@@ -383,8 +420,8 @@ Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_iterations_unused, i
         int im_iterations = pm_iters; 
 
         for (int im_iter = 0; im_iter < im_iterations; ++im_iter) {
-            calcGradient(resize_img, gradX, gradY);
-            createFeatureMap(resize_img, gradX, gradY, feature_img);
+            calcGradient(resize_img, gradX, gradY, grad45, grad135);
+            createFeatureMap(resize_img, gradX, gradY, grad45, grad135, feature_img);
             feature_B = feature_img.clone(); 
             
             bool is_first_init = (im_iter == 0 && logscale == startscale);

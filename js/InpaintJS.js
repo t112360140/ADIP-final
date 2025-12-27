@@ -673,7 +673,7 @@ if (window.Worker) {
             workerReady=true;
     }
 }
-function buildInpaintTask(cv, srcImage, maskImage, callback){
+function buildInpaintTask(cv, srcImage, maskImage, iters=8){
     return new Promise((resolve, reject) => {
         if(workerReady&&inpaintWorker){
             if (srcImage.type() !== cv.CV_8UC4) {
@@ -706,6 +706,7 @@ function buildInpaintTask(cv, srcImage, maskImage, callback){
                     srcBuffer: srcBuffer,
                     maskBuffer: maskBuffer
                 },
+                iters: iters,
             }, [srcBuffer, maskBuffer]); 
 
             function onMessage(event) {
@@ -718,8 +719,6 @@ function buildInpaintTask(cv, srcImage, maskImage, callback){
                     
                     close();
                     resolve(resultRGBA);
-                }else if(command === 'inpaint-status'&& _uuid==uuid_){
-                    if(callback instanceof Function) callback(data);
                 }else if(error && _uuid==uuid_) {
                     close();
                     reject(new Error(error));
