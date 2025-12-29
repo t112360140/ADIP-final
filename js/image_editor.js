@@ -960,7 +960,7 @@ function drawMergeImage(isPreview = false) {
     const maskBufferCtx = maskBuffer.getContext('2d');
     let isMaskDrawn = false;
 
-    const featherRange = 2; 
+    const featherRange = 5; 
 
     try {
         for (let i = 0; i < image_editing_data.layer.length; i++) {
@@ -992,7 +992,7 @@ function drawMergeImage(isPreview = false) {
                     cv.distanceTransform(binaryMask, dist, cv.DIST_L2, 5);
                     let alphaFinal = new cv.Mat();
                     dist.convertTo(alphaFinal, cv.CV_8U, 255.0 / featherRange); 
-                    let blurSize = Math.max(3, (featherRange * 2) + 1); 
+                    let blurSize = Math.max(7, (featherRange * 2) + 1); 
                     if (blurSize % 2 === 0) blurSize++; 
                     cv.GaussianBlur(alphaFinal, alphaFinal, new cv.Size(blurSize, blurSize), 0);
                     channels.set(3, alphaFinal);
