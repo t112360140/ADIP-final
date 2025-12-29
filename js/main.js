@@ -234,3 +234,23 @@ function uuid(length=8){
     const str='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxtz';
     return (new Array(length).fill(0).map((v)=>(str[Math.floor(Math.random()*str.length)]))).join('');
 }
+
+
+const memory_use=document.getElementById('memory-use');
+let print_memory_use=true;
+memory_use.addEventListener('click', ()=>{
+    print_memory_use=!print_memory_use;
+    if(!print_memory_use){
+        memory_use.innerHTML='MEM';
+    }
+});
+if (window.performance && window.performance.memory) {
+    setInterval(()=>{
+        if(print_memory_use){
+            const memoryUsage = window.performance.memory;
+            memory_use.innerHTML=`Used JS Heap Size: ${(memoryUsage.usedJSHeapSize / 1024 / 1024).toFixed(1)} MB<br>
+            Total JS Heap Size: ${(memoryUsage.totalJSHeapSize / 1024 / 1024).toFixed(1)} MB<br>
+            JS Heap Size Limit: ${(memoryUsage.jsHeapSizeLimit / 1024 / 1024).toFixed(1)} MB`;
+        }
+    }, 2000);
+}

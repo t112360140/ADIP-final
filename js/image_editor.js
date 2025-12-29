@@ -408,6 +408,11 @@ function setEditImage(image, mode, config={}){
                 x: 0, y: 0,
                 w: Math.floor(image.width*scale_), h: Math.floor(image.height*scale_),
                 base: (base==null),
+                temp: 50,
+                bright: 50,
+                contrast: 50,
+                tint: 50,
+                saturation: 50,
             });
             if(!config.dontDraw){
                 updateMergeLayerSelect(image.uuid);
@@ -898,6 +903,8 @@ function updateMergeLayerSelect(select){
     }
 
     merge_layer_select.innerHTML=selectOut;
+
+    updateColorCtrl();
 }
 
 function removeMergeLayer(index){
@@ -1758,6 +1765,7 @@ function colorMatch(refIndex, targetIndex) {
 }
 
 
+
 function colorMatch_v2(refIndex, targetIndex) {
     let refSrc = image_editing_data.layer[refIndex].image;
     let tgtSrc = image_editing_data.layer[targetIndex].image;
@@ -2086,7 +2094,7 @@ function relightImage(src, lightPos, intensity = 0.5, shadowIntensity = 0.5, ran
         // 5. 混合應用
         let srcFloat = track(new cv.Mat());
         src.convertTo(srcFloat, cv.CV_32FC4, 1/255.0);
-        let channels = new cv.MatVector();
+        let channels = track(new cv.MatVector());
         cv.split(srcFloat, channels);
 
         for (let i = 0; i < 3; i++) {
@@ -2111,7 +2119,6 @@ function relightImage(src, lightPos, intensity = 0.5, shadowIntensity = 0.5, ran
         let result = new cv.Mat();
         cv.merge(channels, result);
         result.convertTo(result, cv.CV_8U, 255.0);
-        channels.delete();
         return result;
 
     } finally {
@@ -2158,6 +2165,131 @@ function saveRelightImage(){
         width: image_editing_data.img.width,
     });
     fileUpdate();
+}
+
+
+
+function generateNormalMap(src, strength = 1.0, smoothness = 3, invertY = false) {
+    let matsToProcess = [];
+    // 輔助函數：自動追蹤需要釋放的 Mat
+    const track = (mat) => { matsToProcess.push(mat); return mat; };
+
+    try {
+        const rows = src.rows, cols = src.cols;
+
+        // 1. 轉灰階與預處理
+        let grayFloat = track(new cv.Mat());
+        cv.cvtColor(src, grayFloat, cv.COLOR_RGBA2GRAY);
+        grayFloat.convertTo(grayFloat, cv.CV_32F, 1/255.0); // 歸一化到 0.0 - 1.0
+
+        // 模糊處理 (減少噪點造成的雜亂紋理)
+        let blurred = track(new cv.Mat());
+        cv.GaussianBlur(grayFloat, blurred, new cv.Size(smoothness, smoothness), 0);
+
+        // 2. 計算梯度 (Sobel)
+        let dx = track(new cv.Mat());
+        let dy = track(new cv.Mat());
+        // 使用 Sobel 算子計算 X 與 Y 方向的斜率
+        cv.Sobel(blurred, dx, cv.CV_32F, 1, 0, 3);
+        cv.Sobel(blurred, dy, cv.CV_32F, 0, 1, 3);
+
+        // 3. 應用強度 (Strength)
+        // 強度越高，X 和 Y 的變化量越大，凹凸感越深
+        // 我們直接放大 dx, dy，這樣在正規化時 Z 軸佔比就會相對變小
+        let strengthMat = track(new cv.Mat(rows, cols, cv.CV_32F, new cv.Scalar(strength)));
+        cv.multiply(dx, strengthMat, dx);
+        cv.multiply(dy, strengthMat, dy);
+
+        // 4. 計算法線向量 (Normalize)
+        // Normal = ( -dx, -dy, 1.0 ) 
+        // 註：dx 代表亮度變化率。如果右邊亮(dx>0)，表示地形是上坡，法線應該指向左邊(-x)。
+        
+        // 先計算長度 magnitude = sqrt(dx^2 + dy^2 + 1^2)
+        let mag = track(new cv.Mat());
+        let tx = track(new cv.Mat());
+        let ty = track(new cv.Mat());
+        
+        cv.multiply(dx, dx, tx); 
+        cv.multiply(dy, dy, ty);
+        cv.add(tx, ty, mag);
+        
+        // Z 軸固定為 1 (平面基礎)
+        let ones = track(new cv.Mat(rows, cols, cv.CV_32F, new cv.Scalar(1.0)));
+        cv.add(mag, ones, mag); // dx^2 + dy^2 + 1
+        cv.sqrt(mag, mag);      // sqrt(...)
+
+        let nx = track(new cv.Mat());
+        let ny = track(new cv.Mat());
+        let nz = track(new cv.Mat());
+
+        // 進行歸一化並反轉方向 (以符合標準法線貼圖定義)
+        cv.divide(dx, mag, nx, -1.0); // nx = -dx / mag
+        
+        // 處理 Y 軸方向 (有些系統如 DirectX 需要反轉綠色通道)
+        let yFactor = invertY ? 1.0 : -1.0;
+        cv.divide(dy, mag, ny, yFactor); // ny = -dy / mag (or +dy if inverted)
+        
+        cv.divide(ones, mag, nz);     // nz = 1.0 / mag
+
+        // 5. 將向量 (-1 ~ 1) 映射到 顏色 (0 ~ 255)
+        // Color = (Vector + 1) * 0.5 * 255
+        // 即：-1變0, 0變128, 1變255
+        
+        const mapToColor = (mat) => {
+            let tmp = track(new cv.Mat());
+            cv.add(mat, ones, tmp);           // -1..1 -> 0..2
+            cv.multiply(tmp, track(new cv.Mat(rows, cols, cv.CV_32F, new cv.Scalar(0.5 * 255.0))), tmp); // -> 0..255
+            return tmp;
+        };
+
+        let r = mapToColor(nx);
+        let g = mapToColor(ny);
+        let b = mapToColor(nz);
+
+        // 6. 合併通道並輸出
+        let channels = track(new cv.MatVector());
+        // OpenCV 默認順序可能是 BGR 或 RGB，但在 Web Canvas 通常是 RGBA
+        // 標準法線貼圖：R=X, G=Y, B=Z
+        channels.push_back(r);
+        channels.push_back(g);
+        channels.push_back(b);
+        
+        // 如果需要 Alpha 通道 (不透明)
+        let alpha = track(new cv.Mat(rows, cols, cv.CV_32F, new cv.Scalar(255)));
+        channels.push_back(alpha);
+
+        let resultFloat = track(new cv.Mat());
+        cv.merge(channels, resultFloat);
+
+        let result = new cv.Mat();
+        resultFloat.convertTo(result, cv.CV_8U);
+        
+        return result;
+
+    } finally {
+        matsToProcess.forEach(m => {
+            if (m && !m.isDeleted()) m.delete();
+        });
+    }
+}
+
+function saveNormalMapImage(){
+    const perf=newPerf('NormalMap', `執行 向量計算`);
+    let output=generateNormalMap(image_editing_data.img.image, 5, image_editing_data.smoothness);
+    perf.stop();
+    if(output){
+        // cv.imshow(image_editor_canvas, output);
+
+        imageList.push({
+            name: "normal_"+image_editing_data.img.name,
+            image: output,
+            uuid: uuid(),
+            type: TYPE.MASK,
+            height: image_editing_data.img.height,
+            width: image_editing_data.img.width,
+        });
+        fileUpdate();
+    }
 }
 
 
@@ -2255,4 +2387,249 @@ function handleHarmonization() {
         // 觸發即時計算
         applyColorHarmonization(selected, baseIndex, strength);
     }
+}
+
+
+function applyImageAdjustments(targetIndex, tempVal, tintVal, satVal, brightVal, contrastVal) {
+    let matsToProcess = [];
+    const track = (mat) => { matsToProcess.push(mat); return mat; };
+
+    try {
+        const tgtData = image_editing_data.layer[targetIndex];
+
+        // 儲存狀態
+        tgtData.temp = tempVal;
+        tgtData.tint = tintVal;
+        tgtData.saturation = satVal;
+        tgtData.bright = brightVal;
+        tgtData.contrast = contrastVal;
+
+        // 1. 找原圖
+        let originalSource = imageList.find(img => img.uuid === tgtData.uuid);
+        if (!originalSource) return;
+
+        // 若全部預設值，直接還原
+        if (tempVal === 50 && tintVal === 50 && satVal === 50 && brightVal === 50 && contrastVal === 50) {
+            if (tgtData.image) tgtData.image.delete();
+            tgtData.image = originalSource.image.mat_clone();
+            drawMergeImage(true);
+            return;
+        }
+
+        // 2. 複製原圖 (RGBA)
+        let sourceMat = track(originalSource.image.mat_clone());
+        
+        // 分離 Alpha
+        let rgbaPlanes = track(new cv.MatVector());
+        cv.split(sourceMat, rgbaPlanes);
+        let R = track(rgbaPlanes.get(0));
+        let G = track(rgbaPlanes.get(1));
+        let B = track(rgbaPlanes.get(2));
+        let A = track(rgbaPlanes.get(3));
+
+        // ==========================================
+        // A. 白平衡 (White Balance)
+        // 色溫 (Temperature): R / B
+        // 色調 (Tint): G (綠/洋紅)
+        // ==========================================
+        if (tempVal !== 50 || tintVal !== 50) {
+            // 色溫: 50為基準, 範圍約 +/- 20%
+            let tempStrength = (tempVal - 50) / 50.0 * 0.5; 
+            // 色調: 50為基準, 範圍約 +/- 20%
+            let tintStrength = (tintVal - 50) / 50.0 * 0.5;
+
+            // R: 暖(+)增強
+            R.convertTo(R, -1, 1.0 + tempStrength, 0);
+            
+            // B: 冷(-)增強
+            B.convertTo(B, -1, 1.0 - tempStrength, 0);
+
+            // G: 綠(+)增強, 洋紅(-)減弱
+            // Tint > 50 (偏綠): G 變大
+            // Tint < 50 (偏紫): G 變小
+            G.convertTo(G, -1, 1.0 + tintStrength, 0);
+        }
+
+        let rgbMat = track(new cv.Mat());
+        let rgbVector = track(new cv.MatVector());
+        rgbVector.push_back(R);
+        rgbVector.push_back(G);
+        rgbVector.push_back(B);
+        cv.merge(rgbVector, rgbMat);
+
+        // ==========================================
+        // B. 飽和度 (Saturation) - 需轉換至 HSV
+        // ==========================================
+        if (satVal !== 50) {
+            // 轉換到 HSV
+            let hsvMat = track(new cv.Mat());
+            cv.cvtColor(rgbMat, hsvMat, cv.COLOR_RGB2HSV);
+            
+            let hsvPlanes = track(new cv.MatVector());
+            cv.split(hsvMat, hsvPlanes);
+            let H = track(hsvPlanes.get(0));
+            let S = track(hsvPlanes.get(1)); // 飽和度通道
+            let V = track(hsvPlanes.get(2));
+
+            // 計算飽和度係數
+            // 0 -> 0.0 (黑白)
+            // 50 -> 1.0 (原色)
+            // 100 -> 2.0 (兩倍豔麗)
+            let satScale = 1.0 + ((satVal - 50) / 50.0) * 1.5;
+            if (satVal < 50)
+                 // 0~50 區間映射到 0.0~1.0
+                 satScale = satVal / 50.0;
+            
+            // 應用飽和度
+            S.convertTo(S, -1, satScale, 0);
+
+            // 合併並轉回 RGB
+            cv.merge(hsvPlanes, hsvMat);
+            cv.cvtColor(hsvMat, rgbMat, cv.COLOR_HSV2RGB);
+        }
+
+        // ==========================================
+        // C. 亮度 (Brightness) 與 對比 (Contrast)
+        // ==========================================
+        // 亮度: -50 ~ +50
+        let beta = (brightVal - 50) * 2.55;
+        // 對比: 0.5x ~ 1.5x
+        let alpha = 1.0;
+        if (contrastVal > 50) {
+            // 50->1.0, 100->3.0
+            alpha = 1.0 + ((contrastVal - 50) / 50.0) * 2.0; 
+        } else {
+            // 50->1.0, 0->0.0 (全灰)
+            alpha = contrastVal / 50.0;
+        }
+
+        let adjustedBeta = beta + 128.0 * (1.0 - alpha);
+        
+        rgbMat.convertTo(rgbMat, -1, alpha, adjustedBeta);
+
+        // ==========================================
+        // D. 最終合併
+        // ==========================================
+        // 此時 rgbMat 已經經過所有 RGB/HSV 處理
+        let finalVector = track(new cv.MatVector());
+        // 再次分離因為經過 convertTo/cvtColor 後通道可能變了
+        cv.split(rgbMat, finalVector); 
+        
+        let finalPlanes = track(new cv.MatVector());
+        finalPlanes.push_back(track(finalVector.get(0))); // R
+        finalPlanes.push_back(track(finalVector.get(1))); // G
+        finalPlanes.push_back(track(finalVector.get(2))); // B
+        finalPlanes.push_back(A); // Original Alpha
+
+        if (tgtData.image) tgtData.image.delete();
+        tgtData.image = new cv.Mat();
+        cv.merge(finalPlanes, tgtData.image);
+
+        drawMergeImage(true);
+
+    } catch (err) {
+        console.error("影像調整失敗:", err);
+    } finally {
+        matsToProcess.forEach(m => m.delete());
+    }
+}
+
+// 防抖動旗標，避免計算過於頻繁
+var isImageAdjusting = false;
+
+function handleImageAdjustments() {
+    // 1. 取得 DOM 元素
+    const tempInput = document.getElementById('adj-temp');
+    const brightInput = document.getElementById('adj-bright');
+    const contrastInput = document.getElementById('adj-contrast');
+    const tintInput = document.getElementById('adj-tint');
+    const saturationInput = document.getElementById('adj-sat');
+    
+    if (!tempInput || !brightInput || !contrastInput || !tintInput || !saturationInput) return;
+
+    // 2. 取得數值
+    const tempVal = parseInt(tempInput.value, 10);
+    const brightVal = parseInt(brightInput.value, 10);
+    const contrastVal = parseInt(contrastInput.value, 10);
+    const tintVal = parseInt(tintInput.value, 10);
+    const satVal = parseInt(saturationInput.value, 10);
+
+    // 3. 更新文字顯示 UI
+    if (document.getElementById('val-temp')) document.getElementById('val-temp').innerText = tempVal;
+    if (document.getElementById('val-bright')) document.getElementById('val-bright').innerText = brightVal;
+    if (document.getElementById('val-contrast')) document.getElementById('val-contrast').innerText = contrastVal;
+    if (document.getElementById('val-tint')) document.getElementById('val-tint').innerText = tintVal;
+    if (document.getElementById('val-sat')) document.getElementById('val-sat').innerText = satVal;
+
+    // 4. 取得當前選中的圖層
+    const selected = image_editing_data.select;
+
+    // 5. 觸發計算 (加入簡單的鎖定機制)
+    if (!isImageAdjusting && selected >= 0) {
+        isImageAdjusting = true;
+        applyImageAdjustments(selected, tempVal, tintVal, satVal, brightVal, contrastVal);
+        image_editing_data.adjust[selected].temp=tempVal;
+        image_editing_data.adjust[selected].bright=brightVal;
+        image_editing_data.adjust[selected].contrast=contrastVal;
+        image_editing_data.adjust[selected].tint=tintVal;
+        image_editing_data.adjust[selected].saturation=satVal;
+        isImageAdjusting = false;
+    }
+}
+
+function updateLayerParamsAndApply(index, newParams) {
+    if (index < 0 || index >= image_editing_data.layer.length) return;
+    
+    const adj = image_editing_data.adjust[index];
+
+    // 限制數值在 0-100 之間
+    const clamp = (num) => Math.max(0, Math.min(100, Math.round(num)));
+
+    if (newParams.temp !== undefined) adj.temp = clamp(newParams.temp);
+    if (newParams.tint !== undefined) adj.tint = clamp(newParams.tint);
+    if (newParams.saturation !== undefined) adj.saturation = clamp(newParams.saturation);
+    if (newParams.bright !== undefined) adj.bright = clamp(newParams.bright);
+    if (newParams.contrast !== undefined) adj.contrast = clamp(newParams.contrast);
+
+    // 如果操作的是當前選中的圖層，更新 UI 滑桿與文字
+    if (index === image_editing_data.select) {
+        updateColorCtrl(); // 使用你剛剛寫好的 UI 更新函數
+    }
+
+    // 執行非破壞性調整
+    applyImageAdjustments(
+        index, 
+        adj.temp, 
+        adj.tint, 
+        adj.saturation, 
+        adj.bright, 
+        adj.contrast
+    );
+}
+
+
+function updateColorCtrl(){
+    const currentLayer = image_editing_data.adjust[image_editing_data.select];
+    
+    // 如果是舊資料沒有屬性，給予預設值 50
+    const tVal = currentLayer.temp??50;
+    const bVal = currentLayer.bright??50;
+    const cVal = currentLayer.contrast??50;
+    const tiVal = currentLayer.tint??50;
+    const sVal = currentLayer.saturation??50;
+
+    document.getElementById('adj-temp').value = tVal;
+    document.getElementById('val-temp').innerText = tVal;
+
+    document.getElementById('adj-bright').value = bVal;
+    document.getElementById('val-bright').innerText = bVal;
+
+    document.getElementById('adj-contrast').value = cVal;
+    document.getElementById('val-contrast').innerText = cVal;
+
+    document.getElementById('adj-tint').value = tiVal;
+    document.getElementById('val-tint').innerText = tiVal;
+
+    document.getElementById('adj-sat').value = sVal;
+    document.getElementById('val-sat').innerText = sVal;
 }

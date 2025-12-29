@@ -110,9 +110,38 @@
                         }
                     ">轉移顏色</button>
                     <br>
-                    手動轉移顏色: <input type="range" id="harm-strength" min="0" max="100" value="80" 
+                    轉移顏色占比: <input type="range" id="harm-strength" min="0" max="100" value="80" 
                             oninput="handleHarmonization()" style="vertical-align: middle;">
                         <span id="strength-val">80%</span>
+                    <br>
+                    <span style="text-decoration: underline;cursor: pointer;" onclick="
+                            const color_ctrl=document.getElementById('color-ctrl');
+                            if(!color_ctrl.style.display||color_ctrl.style.display=='none')
+                                color_ctrl.style.display='block';
+                            else
+                                color_ctrl.style.display='none';
+                        ">顏色細調</span>
+                    <div id="color-ctrl" style="display: none;">
+                        色溫: <input type="range" id="adj-temp" min="0" max="100" value="50" 
+                                oninput="handleImageAdjustments()" style="vertical-align: middle;">
+                        <span id="val-temp">50</span>
+                        <br>
+                        色調: <input type="range" id="adj-tint" min="0" max="100" value="50" 
+                            oninput="handleImageAdjustments()" style="vertical-align: middle;">
+                        <span id="val-tint">50</span>
+                        <br>
+                        亮度: <input type="range" id="adj-bright" min="0" max="100" value="50" 
+                                oninput="handleImageAdjustments()" style="vertical-align: middle;">
+                        <span id="val-bright">50</span>
+                        <br>
+                        對比: <input type="range" id="adj-contrast" min="0" max="100" value="50" 
+                                oninput="handleImageAdjustments()" style="vertical-align: middle;">
+                        <span id="val-contrast">50</span>
+                        <br>
+                        飽和: <input type="range" id="adj-sat" min="0" max="100" value="50" 
+                            oninput="handleImageAdjustments()" style="vertical-align: middle;">
+                        <span id="val-sat">50</span>
+                    </div>
                     <br>
                     陰影: <input type="checkbox" id="shadow-enable" onchange="
                             if(this.checked){
@@ -150,6 +179,8 @@
                     光滑度: <input id="relight-smooth" type="range" onchange="image_editing_data.smoothness=parseFloat(this.value);updateRelightData();" min="9" max="101" value="51" step="2"><br>
                     Half Lambert: <input id="relight-half" type="checkbox" onchange="image_editing_data.half=this.checked;updateRelightData();">
                     <button onclick="saveRelightImage();">儲存影像</button>
+                    <br>
+                    <button onclick="saveNormalMapImage();">儲存向量圖</button>
                 </div>
             </div>
             <div style="margin-bottom: 25px;">
@@ -164,16 +195,18 @@
             </div>
         </div>
 
-        <div style="position: absolute;top: 0;left: 0;height:50%;max-width:50%;">
+        <div style="position: fixed;top: 0;left: 0;height:50%;max-width:50%;">
             <div id="perf-board-button" style="position: absolute;top: 0;left: 0;height:30px;width: 50px; background: #f0f0a0;border: 2px solid black;display: flex;justify-content: center;align-items: center;cursor: pointer;">PERF</div>
             <div id="perf-board-clear-button" style="position: absolute;top: 0;left: 55;height:30px;width: 50px; background: #f0a0a0;border: 2px solid black;display: none;justify-content: center;align-items: center;cursor: pointer;">CLEAR</div>
             <div id="perf-board" style="display:none;max-height:100%;max-width:100%;min-height:100px;min-width:200px;background: #f0f0f0;border: 2px solid black;overflow-x:inherit;overflow-y: scroll;padding: 35px 5px 5px 5px;"></div>
         </div>
 
-        <div style="position: absolute;top: 0;right: 0;height:50%;max-width:50%;">
+        <div style="position: fixed;top: 0;right: 0;height:50%;max-width:50%;">
             <div id="task-board-button" style="position: absolute;top: 0;right: 0;height:30px;width: 50px; background: #f0a0a0;border: 2px solid black;display: flex;justify-content: center;align-items: center;cursor: pointer;">TASK</div>
             <div id="task-board" style="display:none;max-height:100%;max-width:100%;min-height:100px;min-width:200px;background: #f0f0f0;border: 2px solid black;overflow-x:inherit;overflow-y: scroll;padding: 35px 5px 5px 5px;"></div>
         </div>
+
+        <div id="memory-use" style="position: fixed;bottom: 0;right: 0; background: #a0f0a0;border: 2px solid black;display: flex;justify-content: center;align-items: center;cursor: pointer;">0/0</div>
 
         <script src="js/image_editor.js"></script>
         <script src="js/main.js"></script>
