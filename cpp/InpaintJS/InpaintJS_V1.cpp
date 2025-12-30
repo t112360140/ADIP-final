@@ -21,7 +21,7 @@ const int FEATURE_CHANNELS = 7;
 
 // Sigma 調整: 
 // 為了避免色塊，我們使用較小的基數，配合 Gradient Weight
-float sigma_factor = 2.0f; // 可以嘗試 1.5 ~ 5.0
+float sigma_factor = 5.0f; // 可以嘗試 1.5 ~ 5.0
 float sigma = sigma_factor * 8 * 8; 
 float two_sigma_sq = 2.0f * sigma * sigma;
 
@@ -419,9 +419,9 @@ Mat image_complete_js(Mat im_orig_in, Mat mask_in, int user_pm_iters, int user_p
 
         int im_iterations = pm_iters; 
 
+        calcGradient(resize_img, gradX, gradY, grad45, grad135);
+        createFeatureMap(resize_img, gradX, gradY, grad45, grad135, feature_img);
         for (int im_iter = 0; im_iter < im_iterations; ++im_iter) {
-            calcGradient(resize_img, gradX, gradY, grad45, grad135);
-            createFeatureMap(resize_img, gradX, gradY, grad45, grad135, feature_img);
             feature_B = feature_img.clone(); 
             
             bool is_first_init = (im_iter == 0 && logscale == startscale);

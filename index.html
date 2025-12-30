@@ -183,8 +183,11 @@
                     <button onclick="saveNormalMapImage();">儲存向量圖</button>
                 </div>
             </div>
-            <div style="margin-bottom: 25px;">
+            <div>
                 <button onclick="setEditImage(null, 'NOPE');">清除圖像</button>
+            </div>
+            <div style="margin-bottom: 25px;">
+                影像處理寬度: <input type="number" min="-1" value="-1" onchange="set2Width=parseInt(this.value);" style="width: 50px;">
             </div>
             
             <div>
